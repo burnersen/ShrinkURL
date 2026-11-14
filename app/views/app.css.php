@@ -94,6 +94,25 @@ select.in { appearance: none; -webkit-appearance: none; padding-right: 2rem; cur
 .result .short span { color: var(--muted); font-weight: 500; }
 @keyframes pop { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 
+/* ---------- Datei und Notiz senden ---------- */
+.modes { margin-bottom: 1.1rem; max-width: 100%; }
+.modes button, .views button { padding: .55rem .95rem; font-size: .86rem; }
+.views { margin-bottom: .9rem; }
+.drop { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .35rem; padding: 1.6rem 1rem; border-radius: .95rem; border: 2px dashed var(--line);
+        background: var(--field); cursor: pointer; text-align: center; transition: border-color .15s, background .15s; color: var(--muted); font-size: .9rem; }
+.drop:hover, .drop.over, .drop:focus-within { border-color: var(--acc); background: var(--acc-soft); }
+.drop svg.i { width: 2rem; height: 2rem; color: var(--acc-text); }
+.drop b { color: var(--text); font-size: 1rem; word-break: break-all; }
+.drop input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+textarea.in { min-height: 8.5rem; resize: vertical; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9rem; }
+.prog { height: .6rem; border-radius: .3rem; background: var(--field); border: 1px solid var(--line); overflow: hidden; }
+.prog i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--acc), var(--acc3)); transition: width .2s; }
+.progtext { font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: .35rem; }
+.result .hint { flex-basis: 100%; font-size: .8rem; color: var(--muted); }
+.card .title { display: flex; align-items: center; gap: .5rem; font-size: 1.02rem; font-weight: 700; letter-spacing: -.01em; min-width: 0; }
+.card .title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .title svg.i { color: var(--acc-text); }
+
 /* ---------- Leiste über der Liste ---------- */
 .bar { display: flex; gap: .6rem; align-items: center; margin-bottom: .9rem; flex-wrap: wrap; }
 .bar .search { position: relative; flex: 1 1 14rem; min-width: 0; }

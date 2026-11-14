@@ -2,7 +2,7 @@
 /* ShrinkURL – Datenordner, Datenbank (SQLite), Einstellungen */
 defined('SU_VERSION') || exit;
 
-define('SU_SCHEMA', 1);
+define('SU_SCHEMA', 2);
 
 /**
  * Legt data/ an und sperrt den Ordner nach außen. In data/config.php stehen der zufällige Name
@@ -89,7 +89,8 @@ function suMigrate(PDO $pdo, int $from): void {
         try { $pdo->query('PRAGMA journal_mode = WAL')->fetchAll(); } catch (Throwable $e) {}
         $pdo->exec('BEGIN IMMEDIATE');
         // Zwei Anfragen gleichzeitig beim allerersten Start: die zweite findet alles schon vor
-        if ((int)$pdo->query('PRAGMA user_version')->fetchColumn() >= 1) { $pdo->exec('COMMIT'); return; }
+        if ((int)$pdo->query('PRAGMA user_version')->fetchColumn() >= 1) { $pdo->exec('COMMIT'); $from = 1; }
+        else {
         $pdo->exec("CREATE TABLE users (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -130,6 +131,35 @@ function suMigrate(PDO $pdo, int $from): void {
         ) WITHOUT ROWID');
         $pdo->exec('CREATE TABLE settings (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID');
         $pdo->exec('PRAGMA user_version = 1');
+        $pdo->exec('COMMIT');
+        }
+    }
+    if ((int)$pdo->query('PRAGMA user_version')->fetchColumn() < 2) {
+        $pdo->exec('BEGIN IMMEDIATE');
+        if ((int)$pdo->query('PRAGMA user_version')->fetchColumn() >= 2) { $pdo->exec('COMMIT'); return; }
+        // Dateien und Notizen: Der Inhalt liegt verschlüsselt in data/files/, den Schlüssel kennt der Server nie.
+        // meta = Name, Typ und Größe, ebenfalls verschlüsselt. size = Größe des verschlüsselten Inhalts in Bytes.
+        $pdo->exec("CREATE TABLE files (
+            id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL DEFAULT 'file',
+            label TEXT NOT NULL DEFAULT '',
+            meta TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            plain_size INTEGER NOT NULL,
+            chunk_size INTEGER NOT NULL,
+            chunks INTEGER NOT NULL,
+            received INTEGER NOT NULL DEFAULT 0,
+            complete INTEGER NOT NULL DEFAULT 0,
+            created INTEGER NOT NULL,
+            expires INTEGER NOT NULL,
+            max_downloads INTEGER NOT NULL DEFAULT 1,
+            downloads INTEGER NOT NULL DEFAULT 0,
+            pass TEXT,
+            tokens TEXT NOT NULL DEFAULT '{}'
+        ) WITHOUT ROWID");
+        $pdo->exec('CREATE INDEX files_user ON files (user_id, created)');
+        $pdo->exec('PRAGMA user_version = 2');
         $pdo->exec('COMMIT');
     }
 }

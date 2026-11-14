@@ -4,6 +4,8 @@ Ein Link-Kürzer zum Selbsthosten in **reinem PHP**, installiert mit einer einzi
 
 Kurzlinks funktionieren für jeden, ganz ohne Anmeldung. Anlegen und verwalten kann sie nur, wer ein Konto hat.
 
+Dazu **Dateien und Notizen zum Abholen**: im Browser verschlüsselt, nach dem Abholen oder nach einer Frist vom Server gelöscht.
+
 `shrinkurl-install.php` hochladen, im Browser öffnen, erstes Konto anlegen. Das ist die ganze Installation.
 
 **English version: [README.en.md](README.en.md)**
@@ -21,6 +23,7 @@ Darum geht es bei ShrinkURL zuerst:
 - Die Zielseite erfährt nicht, über welchen Kurzlink jemand kam (`Referrer-Policy: no-referrer`).
 - Schrift, Symbole und QR-Codes kommen vom eigenen Server oder entstehen im Browser. Es wird nichts von außen nachgeladen.
 - Ein Cookie gibt es nur für angemeldete Benutzer der Verwaltung (die Sitzung), nie für Besucher eines Kurzlinks.
+- Dateien und Notizen werden im Browser verschlüsselt (AES-256-GCM), auch Dateiname und Typ. Der Schlüssel steckt im Link hinter dem `#` und erreicht den Server nie. Auf dem Server liegt nur Unlesbares.
 - Einzige Ausnahme, damit niemand Passwörter durchprobieren kann: Nach einer **falschen** Passworteingabe (Anmeldung oder geschützter Link) wird für höchstens einen Tag eine nicht zurückrechenbare Prüfsumme der Adresse samt Fehlerzähler abgelegt. Wer einen Link einfach nur aufruft, hinterlässt nichts.
 
 Die Logdateien deines Webservers gehören nicht zu ShrinkURL. Ob dort IP-Adressen landen, stellst du bei deinem Hoster ein.
@@ -34,6 +37,9 @@ Die Logdateien deines Webservers gehören nicht zu ShrinkURL. Ob dort IP-Adresse
 - Tracking-Anhängsel (`utm_…`, `fbclid`, `gclid` und ähnliche) werden beim Kürzen auf Wunsch entfernt
 - QR-Code zu jedem Link, im Browser berechnet, als SVG oder PNG zum Herunterladen
 - Statistik pro Link: Aufrufe pro Tag für 30 Tage, 90 Tage oder ein Jahr
+- **Datei senden:** Datei wird im Browser verschlüsselt und in Stücken hochgeladen (passt so auch durch enge Upload-Grenzen des Hosters). Der Empfänger braucht nur den Link. Frist, Zahl der Abrufe und Passwort sind einstellbar, nach dem letzten Abruf wird sofort gelöscht.
+- **Notiz senden:** dasselbe für Text, zum Beispiel ein Passwort, das nicht dauerhaft in einem Chat stehen soll
+- Grenzen für Dateien in der Verwaltung: größte Datei, Platz insgesamt, längste Aufbewahrung
 - Suchen, filtern, sortieren, bearbeiten, abschalten, löschen, Export als CSV
 - Mehrere Benutzer. Der Administrator legt Konten an, es gibt keine offene Registrierung. Jeder sieht nur seine eigenen Links.
 - Zwei-Faktor-Anmeldung (TOTP), Wiederherstellungscode, Bremse gegen Durchprobieren
@@ -46,6 +52,10 @@ Die Logdateien deines Webservers gehören nicht zu ShrinkURL. Ob dort IP-Adresse
 |---|---|---|
 | ![QR-Code](docs/qr.png) | ![Statistik](docs/stats.png) | ![Passwortabfrage](docs/protected.png) |
 
+| Datei senden | Datei abholen | Notiz abholen |
+|---|---|---|
+| ![Datei senden](docs/send.png) | ![Datei abholen](docs/file.png) | ![Notiz abholen](docs/note.png) |
+
 ## Voraussetzungen
 
 - PHP 7.4 oder neuer (empfohlen 8.x) mit der Erweiterung `pdo_sqlite`. Die ist bei fast jedem Hoster von Haus aus an.
@@ -53,7 +63,9 @@ Die Logdateien deines Webservers gehören nicht zu ShrinkURL. Ob dort IP-Adresse
 - **HTTPS.** Ohne HTTPS geht dein Passwort im Klartext durchs Netz.
 - Am besten eine eigene (Sub-)Domain, damit die Links kurz bleiben. Ein Unterordner geht auch.
 
-Gespeichert wird in einer SQLite-Datei im Ordner `data/`. Dafür musst du nichts einrichten.
+Gespeichert wird in einer SQLite-Datei im Ordner `data/`, verschlüsselte Dateien liegen in `data/files/`. Dafür musst du nichts einrichten.
+
+Für Dateien und Notizen braucht der Browser HTTPS (sonst steht die Verschlüsselung nicht zur Verfügung).
 
 ## Installation
 
@@ -124,10 +136,14 @@ Ein Kurzlink-Aufruf lädt nur das Nötigste: eine Datenbankabfrage, Zähler erh�
 
 Eine Sicherheitslücke gefunden? Bitte nicht als öffentliches Issue, sondern über „Report a vulnerability“ im Reiter *Security* des Repositorys.
 
-## Geplant
+## Dateien und Notizen im Detail
 
-- Dateien verschicken, die nach dem Herunterladen oder nach einer Frist gelöscht werden, im Browser verschlüsselt
-- Selbstzerstörende Textnotizen
+- Der Link sieht so aus: `https://deine-domain/f/<Kennung>#<Schlüssel>`. Browser schicken den Teil hinter dem `#` nie an den Server.
+- Wer den Link hat, kann abholen. Gib ihn also nur an die Person weiter, für die er gedacht ist. Ein zusätzliches Passwort schützt, falls der Link in falsche Hände gerät.
+- Der Server kennt den Schlüssel nicht. Den Link kannst du deshalb später nur in dem Browser noch einmal kopieren, von dem du hochgeladen hast (er merkt sich den Schlüssel lokal).
+- Gelöscht wird nach dem letzten erlaubten Abruf sofort, sonst nach der Frist. Ein Cronjob sorgt dafür, dass Abgelaufenes auch dann verschwindet, wenn niemand mehr vorbeischaut.
+- Vorgaben: höchstens 1 GB pro Datei, 20 GB insgesamt, 30 Tage. Alles in der Verwaltung änderbar. Sehr große Dateien brauchen beim Abholen einen aktuellen Browser, am Handy kann der Arbeitsspeicher die Grenze sein.
+- Am iPhone gibt es kein Teilen-Ziel für Web-Apps, das unterstützt nur Chrome unter Android.
 
 ## Entwickeln
 

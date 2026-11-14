@@ -4,6 +4,8 @@ A self-hosted link shortener in **plain PHP**, installed with a single file. No 
 
 Short links work for everyone without signing in. Only people with an account can create and manage them.
 
+Plus **files and notes for pick-up**: encrypted in the browser, deleted from the server after pick-up or after a period.
+
 Upload `shrinkurl-install.php`, open it in the browser, create the first account. That is the whole installation.
 
 **Deutsche Fassung: [README.md](README.md)**
@@ -21,6 +23,7 @@ This is what ShrinkURL is about first of all:
 - The destination does not learn which short link someone came through (`Referrer-Policy: no-referrer`).
 - Font, icons and QR codes come from your own server or are created in the browser. Nothing is loaded from outside.
 - A cookie exists only for signed-in users of the dashboard (the session), never for visitors of a short link.
+- Files and notes are encrypted in the browser (AES-256-GCM), including file name and type. The key is in the link after the `#` and never reaches the server. The server only holds unreadable data.
 - The one exception, so that nobody can guess passwords: after a **wrong** password (sign-in or protected link), a non-reversible checksum of the address and a failure counter are kept for at most one day. Simply visiting a link leaves nothing behind.
 
 Your web server's log files are not part of ShrinkURL. Whether IP addresses end up there is a setting at your hosting provider.
@@ -34,6 +37,9 @@ Your web server's log files are not part of ShrinkURL. Whether IP addresses end 
 - Tracking parameters (`utm_…`, `fbclid`, `gclid` and the like) can be removed when shortening
 - QR code for every link, computed in the browser, downloadable as SVG or PNG
 - Statistics per link: visits per day for 30 days, 90 days or a year
+- **Send a file:** the file is encrypted in the browser and uploaded in pieces (so it fits through tight upload limits). The recipient only needs the link. Period, number of pick-ups and password are configurable, after the last pick-up it is deleted immediately.
+- **Send a note:** the same for text, e.g. a password that should not stay in a chat forever
+- Limits for files in the administration: largest file, total space, longest retention
 - Search, filter, sort, edit, switch off, delete, export as CSV
 - Multiple users. The administrator creates accounts, there is no open registration. Everyone sees only their own links.
 - Two-factor sign-in (TOTP), recovery code, throttling against guessing
@@ -49,7 +55,9 @@ Your web server's log files are not part of ShrinkURL. Whether IP addresses end 
 - **HTTPS.** Without HTTPS your password travels in plain text.
 - Ideally a (sub)domain of its own so links stay short. A subfolder works too.
 
-Everything is stored in one SQLite file in the folder `data/`. There is nothing to set up for that.
+Everything is stored in one SQLite file in the folder `data/`, encrypted files live in `data/files/`. There is nothing to set up for that.
+
+Files and notes need HTTPS in the browser (otherwise encryption is not available).
 
 ## Installation
 
@@ -105,10 +113,14 @@ location / { try_files $uri /index.php$is_args$args; }
 
 Found a vulnerability? Please do not open a public issue, use "Report a vulnerability" on the repository's *Security* tab.
 
-## Planned
+## Files and notes in detail
 
-- Sending files that are deleted after download or after a period, encrypted in the browser
-- Self-destructing text notes
+- The link looks like `https://your-domain/f/<id>#<key>`. Browsers never send the part after the `#` to the server.
+- Whoever has the link can pick up, so only pass it to the intended person. An additional password protects in case the link ends up in the wrong hands.
+- The server does not know the key. You can therefore only copy the link again later in the browser you uploaded from (it remembers the key locally).
+- Deletion happens immediately after the last allowed pick-up, otherwise after the period. A cron job makes sure expired items disappear even if nobody comes by.
+- Defaults: 1 GB per file, 20 GB in total, 30 days. All configurable in the administration.
+- iPhones have no share target for web apps, only Chrome on Android supports it.
 
 ## Development
 

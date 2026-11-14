@@ -40,6 +40,7 @@ function suSecurityHeaders(bool $html = false): void {
             . "img-src 'self' data: blob:; "
             . "connect-src 'self'; "
             . "manifest-src 'self'; "
+            . "worker-src 'self'; "
             . "frame-ancestors 'none'; "
             . "base-uri 'none'; "
             . "form-action 'self'");

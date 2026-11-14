@@ -43,6 +43,9 @@ const ICONS = {
     download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     dice: '<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h.01M16 8h.01M12 12h.01M8 16h.01M16 16h.01"/>',
+    file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/>',
+    note: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/>',
+    upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
 };
 const icon = name => '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">' + ICONS[name] + '</svg>';
 
@@ -568,7 +571,7 @@ function statsDialog(link) {
 
 /* ---------- Liste ---------- */
 
-const state = { q: '', filter: '', sort: 'new', all: false, links: [], total: 0, clicks: 0 };
+const state = { q: '', filter: '', sort: 'new', all: false, links: [], total: 0, clicks: 0, view: 'links', files: [], used: 0, quota: 0 };
 
 function relTime(ts) {
     const s = ts - Date.now() / 1000;
@@ -637,6 +640,7 @@ function replaceLink(link) {
 }
 
 function render() {
+    if (state.view === 'files') return renderFiles();
     const box = $('cards');
     if (!state.links.length) {
         const e = el('div', { class: 'empty', style: 'grid-column:1/-1' });
@@ -652,6 +656,7 @@ function render() {
 
 let loadSeq = 0;
 async function load(reset) {
+    if (state.view === 'files') return loadFiles();
     const seq = ++loadSeq;
     const offset = reset ? 0 : state.links.length;
     const r = await run('list', { q: state.q, filter: state.filter, sort: state.sort, all: state.all, offset });
@@ -675,7 +680,7 @@ $('optToggle').addEventListener('click', () => {
 
 function showResult(link) {
     const host = BOOT.base.replace(/^https?:\/\//, '');
-    $('result').replaceChildren(el('div', { class: 'result' },
+    fill($('result'), el('div', { class: 'result' },
         el('a', { class: 'short', href: link.short + '+', target: '_blank', rel: 'noopener noreferrer', title: T('Vorschau öffnen (zählt nicht als Aufruf)') }, el('span', { text: host }), link.code),
         btn(T('Kopieren'), 'btn-primary', () => copyText(link.short), 'copy'),
         btn(T('QR-Code'), 'btn-second', () => qrDialog(link), 'qr')
@@ -698,6 +703,260 @@ $('newForm').addEventListener('submit', async e => {
     if (!navigator.clipboard) toast(T('Gekürzt'));
     load(true);
 });
+
+/* ---------- Dateien und Notizen: im Browser verschlüsseln, stückweise hochladen ---------- */
+
+const fmtSize = b => b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1).replace('.', BOOT.lang === 'en' ? '.' : ',') + ' KB'
+    : b < 1073741824 ? (b / 1048576).toFixed(1).replace('.', BOOT.lang === 'en' ? '.' : ',') + ' MB' : (b / 1073741824).toFixed(2).replace('.', BOOT.lang === 'en' ? '.' : ',') + ' GB';
+
+/* Die Schlüssel kennt der Server nie. Damit sich ein Link später noch einmal kopieren lässt,
+   merkt sich der Browser, von dem hochgeladen wurde, Schlüssel und Namen (nur auf diesem Gerät). */
+const KEYS = {
+    name: 'su_keys_' + BOOT.user.id,
+    all() { try { return JSON.parse(localStorage.getItem(this.name)) || {}; } catch (e) { return {}; } },
+    save(all) { try { localStorage.setItem(this.name, JSON.stringify(all)); } catch (e) {} },
+    put(id, k, name) { const all = this.all(); all[id] = { k, name }; this.save(all); },
+    drop(id) { const all = this.all(); delete all[id]; this.save(all); },
+    prune(ids) { const all = this.all(); let hit = false; for (const id of Object.keys(all)) if (!ids.includes(id)) { delete all[id]; hit = true; } if (hit) this.save(all); },
+};
+
+function buildSecretOptions(kind) {
+    const maxTtl = BOOT.files.maxDays * 86400;
+    const presets = [[3600, T('1 Stunde')], [86400, T('1 Tag')], [604800, T('7 Tage')], [2592000, T('30 Tage')]].filter(p => p[0] <= maxTtl);
+    if (!presets.some(p => p[0] === maxTtl)) presets.push([maxTtl, T('%s Tage', BOOT.files.maxDays)]);
+    const def = presets.some(p => p[0] === 604800) ? 604800 : presets[presets.length - 1][0];
+    const ttl = select(presets.map(p => [String(p[0]), p[1]]), String(def));
+    const max = input({ type: 'number', min: 1, max: 1000, step: 1, inputmode: 'numeric', value: 1 });
+    const pass = input({ type: 'password', autocomplete: 'new-password', placeholder: T('ohne') });
+    const label = input({ maxlength: 200, placeholder: T('nur für dich, steht unverschlüsselt in deiner Liste') });
+    return {
+        node: el('div', { class: 'stack' },
+            el('div', { class: 'grid3' },
+                field(T('Wird gelöscht nach'), ttl),
+                field(kind === 'note' ? T('So oft anzeigbar') : T('So oft herunterladbar'), max),
+                field(T('Passwort'), pass)),
+            field(T('Bezeichnung'), label)),
+        read: () => ({ ttl: ttl.value, max_downloads: max.value || '1', pass: pass.value, label: label.value }),
+        reset() { ttl.value = String(def); max.value = 1; pass.value = ''; label.value = ''; },
+    };
+}
+
+/** Verschlüsselt den Inhalt Stück für Stück und lädt ihn hoch. Liefert den fertigen Link samt Schlüssel. */
+async function sendSecret(kind, blob, meta, opts, onProgress) {
+    if (!SUC.ok) throw new Error(T('Dieser Browser kann hier nicht verschlüsseln. Bitte einen aktuellen Browser und HTTPS verwenden.'));
+    const raw = SUC.newKey();
+    const key = await SUC.load(raw);
+    const cs = kind === 'note' ? Math.min(BOOT.files.chunk, 262144) : BOOT.files.chunk;
+    const init = await api('file_init', Object.assign({ kind, size: blob.size, chunk_size: cs, meta: await SUC.encMeta(key, meta) }, opts));
+    try {
+        for (let n = 0; n < init.chunks; n++) {
+            const enc = await SUC.encChunk(key, n, init.chunks, await blob.slice(n * cs, (n + 1) * cs).arrayBuffer());
+            for (let attempt = 0; ; attempt++) {
+                let msg = '';
+                try {
+                    const res = await fetch('./?action=file_chunk&id=' + init.id + '&n=' + n, {
+                        method: 'POST', body: enc, credentials: 'same-origin', cache: 'no-store',
+                        headers: { 'X-CSRF-Token': BOOT.csrf, 'Content-Type': 'application/octet-stream' },
+                    });
+                    const json = await res.json();
+                    if (json.success) break;
+                    msg = json.message || '';
+                } catch (e) {}
+                if (attempt >= 3) throw new Error(msg || T('Der Upload ist abgebrochen. Bitte die Verbindung prüfen und noch einmal versuchen.'));
+                await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+            }
+            onProgress && onProgress(Math.min(blob.size, (n + 1) * cs), blob.size);
+        }
+    } catch (e) {
+        api('file_delete', { id: init.id }).catch(() => {});
+        throw e;
+    }
+    const k = SUC.b64e(raw);
+    KEYS.put(init.id, k, meta.name || '');
+    return { id: init.id, url: init.url + '#' + k };
+}
+
+function showSecretResult(res, kind) {
+    const host = BOOT.base.replace(/^https?:\/\//, '');
+    fill($('result'), el('div', { class: 'result' },
+        el('span', { class: 'short', style: 'font-size:1.05rem' }, el('span', { text: host + 'f/' }), res.id, el('span', { text: '#…' })),
+        btn(T('Link kopieren'), 'btn-primary', () => copyText(res.url), 'copy'),
+        btn(T('QR-Code'), 'btn-second', () => qrDialog({ short: res.url, code: res.id }), 'qr'),
+        el('div', { class: 'hint', text: kind === 'note'
+            ? T('Der Schlüssel steckt im Link hinter dem #. Der Server kennt ihn nicht und kann die Notiz nicht lesen. Kopieren kannst du den Link später nur noch auf diesem Gerät.')
+            : T('Der Schlüssel steckt im Link hinter dem #. Der Server kennt ihn nicht und kann die Datei nicht lesen. Kopieren kannst du den Link später nur noch auf diesem Gerät.') })
+    ));
+    navigator.clipboard && navigator.clipboard.writeText(res.url).then(() => toast(T('Hochgeladen und Link kopiert')), () => toast(T('Hochgeladen')));
+    if (!navigator.clipboard) toast(T('Hochgeladen'));
+}
+
+let uploading = false;
+window.addEventListener('beforeunload', e => { if (uploading) { e.preventDefault(); e.returnValue = ''; } });
+
+function buildFilePane() {
+    const opts = buildSecretOptions('file');
+    const pick = el('input', { type: 'file' });
+    const title = el('b', { text: T('Datei auswählen oder hierher ziehen') });
+    const sub = el('span', { text: T('Höchstens %s. Wird in deinem Browser verschlüsselt, bevor sie hochgeladen wird.', fmtSize(BOOT.files.maxBytes)) });
+    const drop = el('label', { class: 'drop' }, pick, el('span', { icon: 'upload' }), title, sub);
+    let file = null;
+    const choose = f => {
+        file = f || null;
+        title.textContent = file ? file.name : T('Datei auswählen oder hierher ziehen');
+        sub.textContent = file ? fmtSize(file.size) : T('Höchstens %s. Wird in deinem Browser verschlüsselt, bevor sie hochgeladen wird.', fmtSize(BOOT.files.maxBytes));
+    };
+    pick.addEventListener('change', () => choose(pick.files[0]));
+    ['dragenter', 'dragover'].forEach(n => drop.addEventListener(n, e => { e.preventDefault(); drop.classList.add('over'); }));
+    ['dragleave', 'drop'].forEach(n => drop.addEventListener(n, e => { e.preventDefault(); drop.classList.remove('over'); }));
+    drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) choose(e.dataTransfer.files[0]); });
+    const bar = el('i', {});
+    const progText = el('div', { class: 'progtext' });
+    const prog = el('div', { hidden: true }, el('div', { class: 'prog' }, bar), progText);
+    const go = el('button', { class: 'btn btn-primary', type: 'submit', text: T('Verschlüsseln und hochladen') });
+    const form = el('form', { class: 'stack', autocomplete: 'off' },
+        el('h1', { text: T('Datei senden') }),
+        el('p', { class: 'sub', text: T('Der Empfänger bekommt einen Link. Nach dem Abholen oder nach der Frist wird die Datei vom Server gelöscht.') }),
+        drop, opts.node, prog, el('div', {}, go));
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        if (uploading) return;
+        if (!file) { toast(T('Bitte erst eine Datei auswählen.'), true); return; }
+        if (file.size > BOOT.files.maxBytes) { toast(T('Die Datei ist zu groß. Erlaubt sind höchstens %s.', fmtSize(BOOT.files.maxBytes)), true); return; }
+        uploading = true; go.disabled = true; prog.hidden = false; bar.style.width = '0'; progText.textContent = '';
+        try {
+            const res = await sendSecret('file', file, { name: file.name, type: file.type || '', size: file.size }, opts.read(), (done, total) => {
+                bar.style.width = (total ? (done / total) * 100 : 100) + '%';
+                progText.textContent = T('%s von %s hochgeladen', fmtSize(done), fmtSize(total));
+            });
+            pick.value = ''; choose(null); opts.reset();
+            showSecretResult(res, 'file');
+            setView('files');
+        } catch (err) { toast(err.message, true); }
+        uploading = false; go.disabled = false; prog.hidden = true;
+    });
+    return form;
+}
+
+function buildNotePane() {
+    const opts = buildSecretOptions('note');
+    const text = el('textarea', { class: 'in', placeholder: T('Passwort, Zugangsdaten, eine Nachricht…'), 'aria-label': T('Notiz'), required: true });
+    const go = el('button', { class: 'btn btn-primary', type: 'submit', text: T('Verschlüsseln und Link erzeugen') });
+    const form = el('form', { class: 'stack', autocomplete: 'off' },
+        el('h1', { text: T('Notiz senden') }),
+        el('p', { class: 'sub', text: T('Für alles, was nicht dauerhaft in einem Chat stehen soll. Nach dem Anzeigen oder nach der Frist wird die Notiz vom Server gelöscht.') }),
+        text, opts.node, el('div', {}, go));
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const bytes = new TextEncoder().encode(text.value);
+        if (!bytes.length) return;
+        if (bytes.length > BOOT.files.noteMax) { toast(T('Die Notiz ist zu lang (höchstens %s Zeichen).', num(BOOT.files.noteMax)), true); return; }
+        go.disabled = true;
+        try {
+            const res = await sendSecret('note', new Blob([bytes]), { name: '', type: 'text/plain', size: bytes.length }, opts.read());
+            text.value = ''; opts.reset();
+            showSecretResult(res, 'note');
+            setView('files');
+        } catch (err) { toast(err.message, true); }
+        go.disabled = false;
+    });
+    return form;
+}
+
+function fileCard(f) {
+    const local = KEYS.all()[f.id];
+    const note = f.kind === 'note';
+    const name = f.label || (local && local.name) || (note ? T('Notiz') : T('Datei'));
+    const url = local ? f.url + '#' + local.k : null;
+    const tags = [];
+    const tag = (cls, iconName, text, title) => {
+        const t = el('span', { class: 'tag ' + cls, title });
+        if (iconName) t.innerHTML = icon(iconName);
+        t.append(text);
+        tags.push(t);
+    };
+    if (f.state === 'pending') tag('bad', 'upload', T('Upload nicht abgeschlossen'));
+    tag('warn', 'clock', T('noch %s', relTime(f.expires)), T('Wird gelöscht am %s', fmtDateTime(f.expires)));
+    if (f.has_pass) tag('acc', 'lock', T('Passwort'));
+    if (state.all && f.owner) tag('', 'user', f.owner);
+    if (!local && f.state !== 'pending') tag('', null, T('Link nur auf dem Gerät des Uploads'), T('Der Schlüssel liegt nur in dem Browser, von dem hochgeladen wurde. Der Server kennt ihn nicht.'));
+    tag('', null, fmtDate(f.created), T('Angelegt am %s', fmtDateTime(f.created)));
+    return el('article', { class: 'card glass' + (f.state === 'pending' ? ' ended' : '') },
+        el('div', { class: 'head' },
+            el('div', { class: 'title', title: name }, el('span', { icon: note ? 'note' : 'file', style: 'display:flex' }), el('span', { text: name })),
+            el('div', { class: 'clicks' }, el('b', { text: num(f.downloads) + ' / ' + num(f.max_downloads) }), el('small', { text: T('Abrufe') }))
+        ),
+        el('div', { class: 'to', text: (note ? T('Notiz') : T('Datei')) + ', ' + fmtSize(f.size) }),
+        el('div', { class: 'tags' }, tags),
+        el('div', { class: 'acts' },
+            url ? btn(T('Link kopieren'), 'btn-soft', () => copyText(url), 'copy') : el('span', { style: 'flex:1 1 auto' }),
+            url ? ibtn('qr', T('QR-Code'), () => qrDialog({ short: url, code: f.id })) : null,
+            ibtn('trash', T('Löschen'), async () => {
+                if (!await confirmBox(note ? T('Notiz löschen?') : T('Datei löschen?'), T('„%s“ wird sofort vom Server gelöscht, der Link funktioniert danach nicht mehr.', name), T('Löschen'), true)) return;
+                if (await run('file_delete', { id: f.id }, T('Gelöscht.'))) { KEYS.drop(f.id); loadFiles(); }
+            }, 'danger')
+        )
+    );
+}
+
+function renderFiles() {
+    const box = $('cards');
+    if (!state.files.length) {
+        const e = el('div', { class: 'empty', style: 'grid-column:1/-1' });
+        e.innerHTML = icon('file');
+        e.append(el('div', { text: T('Hier liegt gerade nichts. Dateien und Notizen verschwinden von selbst, sobald sie abgeholt oder abgelaufen sind.') }));
+        fill(box, e);
+    } else {
+        fill(box, state.files.map(fileCard));
+    }
+    $('sum').textContent = state.files.length === 1 ? T('1 Eintrag, %s von %s belegt', fmtSize(state.used), fmtSize(state.quota))
+        : T('%s Einträge, %s von %s belegt', num(state.files.length), fmtSize(state.used), fmtSize(state.quota));
+    $('more').hidden = true;
+}
+
+async function loadFiles() {
+    const seq = ++loadSeq;
+    const r = await run('file_list', { all: state.all });
+    if (!r || seq !== loadSeq) return;
+    state.files = r.files;
+    state.used = r.used;
+    state.quota = r.total;
+    if (!state.all) KEYS.prune(r.files.map(f => f.id));
+    renderFiles();
+}
+
+function setView(view) {
+    state.view = view;
+    $('views').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === view));
+    document.querySelectorAll('#bar .search, #bar select').forEach(n => { n.hidden = view === 'files'; });
+    load(true);
+}
+
+function setMode(mode) {
+    $('modes').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.v === mode));
+    $('modeLink').hidden = mode !== 'link';
+    $('modeFile').hidden = mode !== 'file';
+    $('modeNote').hidden = mode !== 'note';
+    fill($('result'));
+    if (mode === 'link') $('newUrl').focus();
+}
+
+if (BOOT.files.on) {
+    const tab = (v, label, iconName, onpick) => {
+        const b = el('button', { type: 'button', 'data-v': v, role: 'tab', onclick: () => onpick(v) });
+        b.innerHTML = icon(iconName);
+        b.append(label);
+        return b;
+    };
+    fill($('modes'), tab('link', T('Link kürzen'), 'link', setMode), tab('file', T('Datei senden'), 'upload', setMode), tab('note', T('Notiz senden'), 'note', setMode));
+    fill($('views'), tab('links', T('Links'), 'link', setView), tab('files', T('Dateien & Notizen'), 'file', setView));
+    $('modeFile').append(buildFilePane());
+    $('modeNote').append(buildNotePane());
+    $('modes').firstChild.classList.add('on');
+    $('views').firstChild.classList.add('on');
+} else {
+    $('modes').hidden = true;
+    $('views').hidden = true;
+}
 
 /* ---------- Bearbeiten ---------- */
 
@@ -915,15 +1174,24 @@ function adminDialog() {
     const imprint = input({ value: s.imprint_url, placeholder: 'https://…', inputmode: 'url' });
     const privacy = input({ value: s.privacy_url, placeholder: 'https://…', inputmode: 'url' });
     const keep = input({ type: 'number', min: 0, max: 3650, value: s.keep_expired_days });
+    const fMax = input({ type: 'number', min: 1, max: 102400, value: s.files_max_mb });
+    const fTotal = input({ type: 'number', min: 0, max: 10000, value: s.files_total_gb });
+    const fDays = input({ type: 'number', min: 1, max: 365, value: s.files_max_days });
     const form = el('form', { class: 'stack' },
         el('div', { class: 'grid2' }, field(T('Name der Seite'), site), field(T('Abgelaufene Links löschen nach (Tagen)'), keep, T('(0 = nie)'))),
         el('div', { class: 'grid2' }, field(T('Adresse des Impressums'), imprint), field(T('Adresse der Datenschutzerklärung'), privacy)),
         el('p', { text: T('Impressum und Datenschutz erscheinen als Links unter der Anmeldung und unter den Hinweisseiten der Kurzlinks.') }),
+        el('div', { class: 'grid3' },
+            field(T('Größte Datei (MB)'), fMax),
+            field(T('Platz für alle Dateien (GB)'), fTotal, T('(0 = Dateien aus)')),
+            field(T('Längste Aufbewahrung (Tage)'), fDays)),
+        el('p', { text: T('Diese Grenzen gelten für Dateien und Notizen aller Konten zusammen. Sie greifen nach dem nächsten Laden der Seite.') }),
         el('div', {}, el('button', { class: 'btn btn-second', type: 'submit', text: T('Einstellungen speichern') }))
     );
     form.addEventListener('submit', async e => {
         e.preventDefault();
-        const data = { site_name: site.value, imprint_url: imprint.value, privacy_url: privacy.value, keep_expired_days: keep.value };
+        const data = { site_name: site.value, imprint_url: imprint.value, privacy_url: privacy.value, keep_expired_days: keep.value,
+            files_max_mb: fMax.value, files_total_gb: fTotal.value, files_max_days: fDays.value };
         if (await run('settings', data)) Object.assign(BOOT.settings, data);
     });
 
@@ -957,6 +1225,8 @@ function helpDialog() {
             mark,
             el('h3', { text: T('Am Handy') }),
             el('p', { text: T('Installiere ShrinkURL über das Browser-Menü als App („Zum Startbildschirm hinzufügen“). Danach taucht es im Teilen-Menü auf, und geteilte Adressen landen direkt im Eingabefeld.') }),
+            el('h3', { text: T('Dateien und Notizen') }),
+            el('p', { text: T('Dateien und Notizen werden in deinem Browser verschlüsselt, bevor sie den Server erreichen. Der Schlüssel steckt im Link hinter dem # und wird nie an den Server geschickt. Wer den Link hat, kann abholen, wer ihn nicht hat, auch der Betreiber nicht, sieht nur Unlesbares. Nach dem letzten erlaubten Abruf oder nach der Frist wird gelöscht.') }),
             el('h3', { text: T('Gut zu wissen') }),
             el('table', { class: 't' }, el('tbody', {},
                 kbd('+', T('Ein Plus hinter dem Kurzlink zeigt, wohin er führt, ohne weiterzuleiten und ohne zu zählen.')),
@@ -1015,6 +1285,11 @@ document.addEventListener('keydown', e => {
     if (url) $('newUrl').value = url;
     $('newUrl').focus();
 })();
+
+// Hintergrund-Helfer der App anmelden (Voraussetzung dafür, dass Android ShrinkURL im Teilen-Menü anbietet)
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname))) {
+    navigator.serviceWorker.register('./?action=sw', { scope: './' }).catch(() => {});
+}
 
 // Konto vom Administrator angelegt: erst ein eigenes Passwort setzen
 if (BOOT.user.mustChange) {
