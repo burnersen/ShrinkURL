@@ -73,6 +73,14 @@ function suFileRow(string $id): ?array {
     return $st->fetch() ?: null;
 }
 
+/** Alle Dateien einer Sendung (ein Link kann mehrere Dateien enthalten), in der Reihenfolge des Hochladens */
+function suFileGroup(string $grp): array {
+    if (!suFileIdOk($grp)) return [];
+    $st = suDb()->prepare('SELECT f.*, u.name AS owner FROM files f JOIN users u ON u.id = f.user_id WHERE f.grp = ? ORDER BY f.idx, f.created');
+    $st->execute([$grp]);
+    return $st->fetchAll();
+}
+
 /** Laufende Downloads: Kennzeichen => Ablaufzeit. Abgelaufene fallen heraus. */
 function suFileTokens(array $f): array {
     $t = json_decode((string)$f['tokens'], true);
@@ -91,8 +99,32 @@ function suFileState(array $f): string {
 
 function suFileDelete(string $id): void {
     if (!suFileIdOk($id)) return;
+    // Erst die Datei, dann der Eintrag: klappt das Löschen der Datei nicht, bleibt der Eintrag
+    // stehen und das nächste Aufräumen versucht es wieder, statt die Datei zu vergessen.
+    $path = suFilePath($id);
+    if (is_file($path)) {
+        @unlink($path);
+        clearstatcache(true, $path);
+        if (is_file($path)) {
+            // Notlösung, falls der Server das Löschen verweigert: Inhalt leeren, damit nichts lesbar liegen bleibt
+            @file_put_contents($path, '');
+            suDb()->prepare('UPDATE files SET expires = 0, complete = 0 WHERE id = ?')->execute([$id]);
+            return;
+        }
+    }
     suDb()->prepare('DELETE FROM files WHERE id = ?')->execute([$id]);
-    @unlink(suFilePath($id));
+}
+
+/**
+ * Aufräumen ohne Cronjob: höchstens alle 10 Minuten, angestoßen von ganz normalen Aufrufen
+ * (Verwaltung öffnen, Abholseite, ab und zu ein Kurzlink).
+ */
+function suFilesCleanupSoon(): void {
+    try {
+        if ((int)suSetting('last_files_cleanup', '0') > time() - 600) return;
+        suSetSetting('last_files_cleanup', (string)time());
+        suFilesCleanup();
+    } catch (Throwable $e) {}
 }
 
 /** Belegter Platz aller Dateien zusammen (auch unfertiger Uploads, mit ihrer angekündigten Größe) */
@@ -107,7 +139,7 @@ function suFileOut(array $f): array {
         'created' => (int)$f['created'], 'expires' => (int)$f['expires'],
         'max_downloads' => (int)$f['max_downloads'], 'downloads' => (int)$f['downloads'],
         'has_pass' => $f['pass'] !== null && $f['pass'] !== '', 'state' => suFileState($f),
-        'owner' => $f['owner'] ?? null, 'user_id' => (int)$f['user_id'], 'url' => suBaseUrl() . 'f/' . $f['id'],
+        'owner' => $f['owner'] ?? null, 'user_id' => (int)$f['user_id'], 'grp' => $f['grp'], 'idx' => (int)$f['idx'],
     ];
 }
 

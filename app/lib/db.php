@@ -2,7 +2,7 @@
 /* ShrinkURL – Datenordner, Datenbank (SQLite), Einstellungen */
 defined('SU_VERSION') || exit;
 
-define('SU_SCHEMA', 2);
+define('SU_SCHEMA', 3);
 
 /**
  * Legt data/ an und sperrt den Ordner nach außen. In data/config.php stehen der zufällige Name
@@ -160,6 +160,17 @@ function suMigrate(PDO $pdo, int $from): void {
         ) WITHOUT ROWID");
         $pdo->exec('CREATE INDEX files_user ON files (user_id, created)');
         $pdo->exec('PRAGMA user_version = 2');
+        $pdo->exec('COMMIT');
+    }
+    if ((int)$pdo->query('PRAGMA user_version')->fetchColumn() < 3) {
+        $pdo->exec('BEGIN IMMEDIATE');
+        if ((int)$pdo->query('PRAGMA user_version')->fetchColumn() >= 3) { $pdo->exec('COMMIT'); return; }
+        // Mehrere Dateien unter einem Link: grp ist die Kennung der Sendung (steht im Link), idx die Nummer der Datei darin
+        $pdo->exec('ALTER TABLE files ADD COLUMN grp TEXT');
+        $pdo->exec('ALTER TABLE files ADD COLUMN idx INTEGER NOT NULL DEFAULT 0');
+        $pdo->exec('UPDATE files SET grp = id');
+        $pdo->exec('CREATE INDEX files_grp ON files (grp, idx)');
+        $pdo->exec('PRAGMA user_version = 3');
         $pdo->exec('COMMIT');
     }
 }

@@ -49,6 +49,18 @@ function suHandleShort(string $path): void {
         if ($method === 'GET') {
             try { suCountClick((int)$link['id']); } catch (Throwable $e) { /* Zähler klemmt: trotzdem weiterleiten */ }
         }
+        // Ohne Cronjob: etwa jeder zwanzigste Aufruf schaut nach, ob abgelaufene Dateien zu löschen sind
+        if (random_int(1, 20) === 1 && is_file(SU_APP . '/lib/files.php')) {
+            header('Location: ' . $link['url'], true, 302);
+            header('Cache-Control: no-store, no-cache, must-revalidate, private');
+            header('Referrer-Policy: no-referrer');
+            header('X-Robots-Tag: noindex, nofollow');
+            header('Content-Length: 0');
+            if (function_exists('fastcgi_finish_request')) fastcgi_finish_request(); else flush();
+            require_once SU_APP . '/lib/files.php';
+            suFilesCleanupSoon();
+            exit;
+        }
         suRedirectTo($link['url'], 302);
     }
 

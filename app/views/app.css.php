@@ -104,6 +104,10 @@ select.in { appearance: none; -webkit-appearance: none; padding-right: 2rem; cur
 .drop svg.i { width: 2rem; height: 2rem; color: var(--acc-text); }
 .drop b { color: var(--text); font-size: 1rem; word-break: break-all; }
 .drop input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.chosen { display: flex; flex-wrap: wrap; gap: .35rem; }
+.chosen .tag { color: var(--text); max-width: 100%; word-break: break-all; }
+.tagx { border: 0; background: none; padding: 0; margin-left: .15rem; color: var(--muted); cursor: pointer; display: inline-flex; }
+.tagx:hover { color: var(--bad); }
 textarea.in { min-height: 8.5rem; resize: vertical; line-height: 1.5; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9rem; }
 .prog { height: .6rem; border-radius: .3rem; background: var(--field); border: 1px solid var(--line); overflow: hidden; }
 .prog i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--acc), var(--acc3)); transition: width .2s; }

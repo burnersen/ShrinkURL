@@ -37,7 +37,8 @@ Die Logdateien deines Webservers gehören nicht zu ShrinkURL. Ob dort IP-Adresse
 - Tracking-Anhängsel (`utm_…`, `fbclid`, `gclid` und ähnliche) werden beim Kürzen auf Wunsch entfernt
 - QR-Code zu jedem Link, im Browser berechnet, als SVG oder PNG zum Herunterladen
 - Statistik pro Link: Aufrufe pro Tag für 30 Tage, 90 Tage oder ein Jahr
-- **Datei senden:** Datei wird im Browser verschlüsselt und in Stücken hochgeladen (passt so auch durch enge Upload-Grenzen des Hosters). Der Empfänger braucht nur den Link. Frist, Zahl der Abrufe und Passwort sind einstellbar, nach dem letzten Abruf wird sofort gelöscht.
+- **Dateien senden:** eine oder mehrere Dateien auf einmal, im Browser verschlüsselt und in Stücken hochgeladen (passt so auch durch enge Upload-Grenzen des Hosters). Der Empfänger braucht nur den Link und kann jede Datei einzeln oder alle nacheinander abholen. Frist, Zahl der Abrufe und Passwort sind einstellbar, nach dem letzten Abruf wird sofort gelöscht.
+- **Merkbare Links:** Dateien und Notizen bekommen einen Abholcode aus drei Wörtern und einer Zahl, zum Beispiel `kurz.example.org/f#welle-apfel-tisch-87`. Den kann man auch durchsagen und unter `kurz.example.org/f` eintippen.
 - **Notiz senden:** dasselbe für Text, zum Beispiel ein Passwort, das nicht dauerhaft in einem Chat stehen soll
 - Grenzen für Dateien in der Verwaltung: größte Datei, Platz insgesamt, längste Aufbewahrung
 - Suchen, filtern, sortieren, bearbeiten, abschalten, löschen, Export als CSV
@@ -52,9 +53,9 @@ Die Logdateien deines Webservers gehören nicht zu ShrinkURL. Ob dort IP-Adresse
 |---|---|---|
 | ![QR-Code](docs/qr.png) | ![Statistik](docs/stats.png) | ![Passwortabfrage](docs/protected.png) |
 
-| Datei senden | Datei abholen | Notiz abholen |
+| Dateien senden | Dateien abholen | Abholcode eintippen |
 |---|---|---|
-| ![Datei senden](docs/send.png) | ![Datei abholen](docs/file.png) | ![Notiz abholen](docs/note.png) |
+| ![Dateien senden](docs/send.png) | ![Dateien abholen](docs/file.png) | ![Abholcode](docs/code.png) |
 
 ## Voraussetzungen
 
@@ -138,10 +139,12 @@ Eine Sicherheitslücke gefunden? Bitte nicht als öffentliches Issue, sondern ü
 
 ## Dateien und Notizen im Detail
 
-- Der Link sieht so aus: `https://deine-domain/f/<Kennung>#<Schlüssel>`. Browser schicken den Teil hinter dem `#` nie an den Server.
+- Der Link sieht so aus: `https://deine-domain/f#wort-wort-wort-12`. Browser schicken den Teil hinter dem `#` nie an den Server. Aus dem Abholcode berechnet der Browser die Kennung der Sendung (die bekommt der Server) und den Schlüssel (der bleibt im Browser).
+- **Wie sicher ist der Abholcode?** Drei Wörter aus rund 4000 und eine zweistellige Zahl ergeben etwa 5 Billionen Möglichkeiten. Durchprobieren über das Netz ist damit aussichtslos. Wer allerdings die verschlüsselten Dateien direkt vom Server kopiert hat (Einbruch beim Hoster), kann Codes ohne den Server durchprobieren. Jeder Versuch ist absichtlich teuer gemacht (PBKDF2, eine Million Runden), das kostet nach grober Schätzung trotzdem nur Jahre an Grafikkarten-Rechenzeit, nicht Jahrtausende. Für besonders Vertrauliches gibt es deshalb beim Senden die Option „Langer Link“ mit einem zufälligen 256-Bit-Schlüssel (`/f/<Kennung>#<Schlüssel>`).
+- Mehrere Dateien unter einem Link werden einzeln gezählt und einzeln gelöscht, jede nach ihrem letzten erlaubten Abruf.
 - Wer den Link hat, kann abholen. Gib ihn also nur an die Person weiter, für die er gedacht ist. Ein zusätzliches Passwort schützt, falls der Link in falsche Hände gerät.
 - Der Server kennt den Schlüssel nicht. Den Link kannst du deshalb später nur in dem Browser noch einmal kopieren, von dem du hochgeladen hast (er merkt sich den Schlüssel lokal).
-- Gelöscht wird nach dem letzten erlaubten Abruf sofort, sonst nach der Frist. Ein Cronjob sorgt dafür, dass Abgelaufenes auch dann verschwindet, wenn niemand mehr vorbeischaut.
+- Gelöscht wird sofort, sobald das letzte Stück des letzten erlaubten Abrufs ausgeliefert ist, sonst nach der Frist. Abgelaufenes räumt ShrinkURL höchstens alle 10 Minuten weg, angestoßen durch normale Aufrufe. Ein Cronjob sorgt dafür, dass das auch passiert, wenn gar niemand vorbeischaut.
 - Vorgaben: höchstens 1 GB pro Datei, 20 GB insgesamt, 30 Tage. Alles in der Verwaltung änderbar. Sehr große Dateien brauchen beim Abholen einen aktuellen Browser, am Handy kann der Arbeitsspeicher die Grenze sein.
 - Am iPhone gibt es kein Teilen-Ziel für Web-Apps, das unterstützt nur Chrome unter Android.
 
@@ -155,6 +158,6 @@ php tools/build-release.php         # baut dist/shrinkurl-install.php und das ZI
 
 ## Lizenz
 
-[GNU Affero General Public License v3.0](LICENSE). Schrift: [Inter](https://github.com/rsms/inter) (SIL Open Font License 1.1). Symbole: [Lucide](https://lucide.dev) (ISC-Lizenz). Beides ist eingebettet.
+[GNU Affero General Public License v3.0](LICENSE). Schrift: [Inter](https://github.com/rsms/inter) (SIL Open Font License 1.1). Symbole: [Lucide](https://lucide.dev) (ISC-Lizenz). Wortlisten für die Abholcodes: deutsch aus [dys2p/wordlists-de](https://github.com/dys2p/wordlists-de) (Unlicense, CC0 oder BSD-3-Clause), englisch von der [Electronic Frontier Foundation](https://www.eff.org/deeplinks/2016/07/new-wordlists-random-passphrases) (CC BY 3.0 US), jeweils gefiltert. Alles ist eingebettet.
 
 Aufbau, Installer und Teile des Codes stammen aus dem Schwesterprojekt [LinkVault](https://github.com/burnersen/LinkVault).

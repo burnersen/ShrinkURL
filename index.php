@@ -29,7 +29,7 @@ error_reporting(E_ALL);
 ini_set('display_errors', '0');
 date_default_timezone_set('Europe/Berlin');
 
-define('SU_VERSION', '2.0.0');
+define('SU_VERSION', '3.0.0');
 define('SU_ROOT', __DIR__);          // hier liegt die index.php, daneben data/
 define('SU_APP', SU_ROOT . '/app');  // Programmteile
 define('SU_DATA_DIR', SU_ROOT . '/data');
@@ -78,10 +78,11 @@ if (PHP_SAPI === 'cli') {
 $suPath = suRequestPath();
 if ($suPath !== '' && $suPath !== 'index.php') {
     // Datei oder Notiz abholen: kurz.example.org/f/<Kennung>
-    if (strncmp($suPath, 'f/', 2) === 0) {
+    // und kurz.example.org/f#drei-woerter-zahl bzw. kurz.example.org/f zum Eintippen des Abholcodes
+    if ($suPath === 'f' || strncmp($suPath, 'f/', 2) === 0) {
         require SU_APP . '/lib/files.php';
         require SU_APP . '/lib/filepage.php';
-        suHandleFile(substr($suPath, 2));
+        if ($suPath === 'f') suHandleFileCode(); else suHandleFile(substr($suPath, 2));
         exit;
     }
     require SU_APP . '/lib/redirect.php';

@@ -6,6 +6,7 @@ $suUser = suCurrentUser();
 if ($suUser === null) exit;
 require_once SU_APP . '/lib/page.php';
 suLazyCleanup();
+suFilesCleanupSoon();
 
 $suPrefs = suUserPrefs($suUser);
 $suIsAdmin = $suUser['role'] === 'admin';

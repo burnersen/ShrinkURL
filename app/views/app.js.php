@@ -710,15 +710,41 @@ const fmtSize = b => b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1).r
     : b < 1073741824 ? (b / 1048576).toFixed(1).replace('.', BOOT.lang === 'en' ? '.' : ',') + ' MB' : (b / 1073741824).toFixed(2).replace('.', BOOT.lang === 'en' ? '.' : ',') + ' GB';
 
 /* Die Schlüssel kennt der Server nie. Damit sich ein Link später noch einmal kopieren lässt,
-   merkt sich der Browser, von dem hochgeladen wurde, Schlüssel und Namen (nur auf diesem Gerät). */
+   merkt sich der Browser, von dem hochgeladen wurde, Abholcode und Namen (nur auf diesem Gerät). */
 const KEYS = {
     name: 'su_keys_' + BOOT.user.id,
     all() { try { return JSON.parse(localStorage.getItem(this.name)) || {}; } catch (e) { return {}; } },
     save(all) { try { localStorage.setItem(this.name, JSON.stringify(all)); } catch (e) {} },
-    put(id, k, name) { const all = this.all(); all[id] = { k, name }; this.save(all); },
+    put(id, entry) { const all = this.all(); all[id] = entry; this.save(all); },
     drop(id) { const all = this.all(); delete all[id]; this.save(all); },
     prune(ids) { const all = this.all(); let hit = false; for (const id of Object.keys(all)) if (!ids.includes(id)) { delete all[id]; hit = true; } if (hit) this.save(all); },
+    /** Vollständiger Link zu einer Sendung oder null, wenn dieser Browser den Code nicht kennt */
+    link(grp) {
+        const e = this.all()[grp];
+        if (!e) return null;
+        return e.p ? BOOT.base + 'f#' + e.p : BOOT.base + 'f/' + grp + '#' + e.k;
+    },
 };
+
+/* Merkbarer Abholcode: drei zufällige Wörter und eine zweistellige Zahl. Gewürfelt wird hier im Browser. */
+let wordList = null;
+async function loadWords() {
+    if (wordList) return wordList;
+    const res = await fetch('./?action=words&l=' + (BOOT.lang === 'en' ? 'en' : 'de'), { credentials: 'same-origin' });
+    const words = (await res.text()).trim().split(' ');
+    if (!res.ok || words.length < 1000) throw new Error(T('Die Wortliste ließ sich nicht laden. Bitte die Seite neu laden.'));
+    return (wordList = words);
+}
+function randomBelow(n) {
+    // gleichmäßig verteilt: Werte, die das Ergebnis verzerren würden, werden verworfen
+    const limit = Math.floor(0x100000000 / n) * n, buf = new Uint32Array(1);
+    do { crypto.getRandomValues(buf); } while (buf[0] >= limit);
+    return buf[0] % n;
+}
+async function newPhrase() {
+    const words = await loadWords();
+    return [0, 1, 2].map(() => words[randomBelow(words.length)]).join('-') + '-' + (10 + randomBelow(90));
+}
 
 function buildSecretOptions(kind) {
     const maxTtl = BOOT.files.maxDays * 86400;
@@ -729,62 +755,96 @@ function buildSecretOptions(kind) {
     const max = input({ type: 'number', min: 1, max: 1000, step: 1, inputmode: 'numeric', value: 1 });
     const pass = input({ type: 'password', autocomplete: 'new-password', placeholder: T('ohne') });
     const label = input({ maxlength: 200, placeholder: T('nur für dich, steht unverschlüsselt in deiner Liste') });
+    const long = el('input', { type: 'checkbox' });
     return {
         node: el('div', { class: 'stack' },
             el('div', { class: 'grid3' },
                 field(T('Wird gelöscht nach'), ttl),
-                field(kind === 'note' ? T('So oft anzeigbar') : T('So oft herunterladbar'), max),
+                field(kind === 'note' ? T('So oft anzeigbar') : T('So oft herunterladbar'), max, kind === 'note' ? '' : T('(je Datei)')),
                 field(T('Passwort'), pass)),
-            field(T('Bezeichnung'), label)),
+            field(T('Bezeichnung'), label),
+            el('label', { class: 'check' }, long, T('Langer Link mit maximal starkem Schlüssel statt drei Wörtern (für besonders Vertrauliches)'))),
         read: () => ({ ttl: ttl.value, max_downloads: max.value || '1', pass: pass.value, label: label.value }),
-        reset() { ttl.value = String(def); max.value = 1; pass.value = ''; label.value = ''; },
+        long: () => long.checked,
+        reset() { ttl.value = String(def); max.value = 1; pass.value = ''; label.value = ''; long.checked = false; },
     };
 }
 
-/** Verschlüsselt den Inhalt Stück für Stück und lädt ihn hoch. Liefert den fertigen Link samt Schlüssel. */
-async function sendSecret(kind, blob, meta, opts, onProgress) {
+/** Lädt ein Stück hoch, mit ein paar Anläufen, falls die Verbindung wackelt */
+async function putChunk(id, n, enc) {
+    for (let attempt = 0; ; attempt++) {
+        let msg = '';
+        try {
+            const res = await fetch('./?action=file_chunk&id=' + id + '&n=' + n, {
+                method: 'POST', body: enc, credentials: 'same-origin', cache: 'no-store',
+                headers: { 'X-CSRF-Token': BOOT.csrf, 'Content-Type': 'application/octet-stream' },
+            });
+            const json = await res.json();
+            if (json.success) return;
+            msg = json.message || '';
+        } catch (e) {}
+        if (attempt >= 3) throw new Error(msg || T('Der Upload ist abgebrochen. Bitte die Verbindung prüfen und noch einmal versuchen.'));
+        await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+    }
+}
+
+/**
+ * Verschlüsselt eine Sendung (eine Notiz oder eine bis mehrere Dateien) Stück für Stück und lädt sie hoch.
+ * items: [{ blob, meta }]. Liefert die Kennung der Sendung und den fertigen Link.
+ */
+async function sendShare(kind, items, opts, long, onProgress) {
     if (!SUC.ok) throw new Error(T('Dieser Browser kann hier nicht verschlüsseln. Bitte einen aktuellen Browser und HTTPS verwenden.'));
-    const raw = SUC.newKey();
-    const key = await SUC.load(raw);
     const cs = kind === 'note' ? Math.min(BOOT.files.chunk, 262144) : BOOT.files.chunk;
-    const init = await api('file_init', Object.assign({ kind, size: blob.size, chunk_size: cs, meta: await SUC.encMeta(key, meta) }, opts));
+    const total = items.reduce((a, it) => a + it.blob.size, 0);
+    let grp = null, raw, phrase = null, key, sent = 0;
     try {
-        for (let n = 0; n < init.chunks; n++) {
-            const enc = await SUC.encChunk(key, n, init.chunks, await blob.slice(n * cs, (n + 1) * cs).arrayBuffer());
-            for (let attempt = 0; ; attempt++) {
-                let msg = '';
-                try {
-                    const res = await fetch('./?action=file_chunk&id=' + init.id + '&n=' + n, {
-                        method: 'POST', body: enc, credentials: 'same-origin', cache: 'no-store',
-                        headers: { 'X-CSRF-Token': BOOT.csrf, 'Content-Type': 'application/octet-stream' },
-                    });
-                    const json = await res.json();
-                    if (json.success) break;
-                    msg = json.message || '';
-                } catch (e) {}
-                if (attempt >= 3) throw new Error(msg || T('Der Upload ist abgebrochen. Bitte die Verbindung prüfen und noch einmal versuchen.'));
-                await new Promise(r => setTimeout(r, 1500 * (attempt + 1)));
+        for (let i = 0; i < items.length; i++) {
+            const { blob, meta } = items[i];
+            let init;
+            if (i === 0) {
+                // Kennung und Schlüssel festlegen. Ist ein gewürfelter Code zufällig schon vergeben, wird neu gewürfelt.
+                for (let attempt = 0; ; attempt++) {
+                    let id = '';
+                    if (long) raw = SUC.newKey();
+                    else { phrase = await newPhrase(); const d = await SUC.fromPhrase(phrase); raw = d.raw; id = d.id; }
+                    key = await SUC.load(raw);
+                    const body = new FormData();
+                    Object.entries(Object.assign({ action: 'file_init', kind, id, size: blob.size, chunk_size: cs, meta: await SUC.encMeta(key, meta, 0) }, opts)).forEach(([k, v]) => body.append(k, v));
+                    const res = await fetch('./', { method: 'POST', body, headers: { 'X-CSRF-Token': BOOT.csrf }, credentials: 'same-origin', cache: 'no-store' });
+                    init = await res.json();
+                    if (init.success) break;
+                    if (!init.taken || attempt >= 4) throw new Error(init.message || T('Das hat nicht geklappt. Bitte noch einmal versuchen.'));
+                }
+                grp = init.grp;
+            } else {
+                init = await api('file_init', Object.assign({ kind, grp, idx: i, size: blob.size, chunk_size: cs, meta: await SUC.encMeta(key, meta, i) }, opts));
             }
-            onProgress && onProgress(Math.min(blob.size, (n + 1) * cs), blob.size);
+            for (let n = 0; n < init.chunks; n++) {
+                const enc = await SUC.encChunk(key, n, init.chunks, await blob.slice(n * cs, (n + 1) * cs).arrayBuffer(), i);
+                await putChunk(init.id, n, enc);
+                onProgress && onProgress(sent + Math.min(blob.size, (n + 1) * cs), total, i);
+            }
+            sent += blob.size;
         }
     } catch (e) {
-        api('file_delete', { id: init.id }).catch(() => {});
+        if (grp) api('file_delete', { grp }).catch(() => {});
         throw e;
     }
-    const k = SUC.b64e(raw);
-    KEYS.put(init.id, k, meta.name || '');
-    return { id: init.id, url: init.url + '#' + k };
+    const names = items.map(it => it.meta.name).filter(Boolean).join(', ').slice(0, 300);
+    KEYS.put(grp, long ? { k: SUC.b64e(raw), name: names } : { p: phrase, name: names });
+    return { grp, url: KEYS.link(grp) };
 }
 
 function showSecretResult(res, kind) {
-    const host = BOOT.base.replace(/^https?:\/\//, '');
+    const text = res.url.replace(/^https?:\/\//, '');
+    const cut = text.length > 60 ? text.slice(0, text.indexOf('#') + 1) + '…' : text;
     fill($('result'), el('div', { class: 'result' },
-        el('span', { class: 'short', style: 'font-size:1.05rem' }, el('span', { text: host + 'f/' }), res.id, el('span', { text: '#…' })),
+        el('span', { class: 'short', style: 'font-size:1.1rem', text: cut }),
         btn(T('Link kopieren'), 'btn-primary', () => copyText(res.url), 'copy'),
-        btn(T('QR-Code'), 'btn-second', () => qrDialog({ short: res.url, code: res.id }), 'qr'),
+        btn(T('QR-Code'), 'btn-second', () => qrDialog({ short: res.url, code: res.grp }), 'qr'),
         el('div', { class: 'hint', text: kind === 'note'
-            ? T('Der Schlüssel steckt im Link hinter dem #. Der Server kennt ihn nicht und kann die Notiz nicht lesen. Kopieren kannst du den Link später nur noch auf diesem Gerät.')
-            : T('Der Schlüssel steckt im Link hinter dem #. Der Server kennt ihn nicht und kann die Datei nicht lesen. Kopieren kannst du den Link später nur noch auf diesem Gerät.') })
+            ? T('Der Abholcode steht im Link hinter dem #. Der Server kennt ihn nicht und kann die Notiz nicht lesen. Kopieren kannst du den Link später nur noch auf diesem Gerät.')
+            : T('Der Abholcode steht im Link hinter dem #. Der Server kennt ihn nicht und kann die Dateien nicht lesen. Kopieren kannst du den Link später nur noch auf diesem Gerät.') })
     ));
     navigator.clipboard && navigator.clipboard.writeText(res.url).then(() => toast(T('Hochgeladen und Link kopiert')), () => toast(T('Hochgeladen')));
     if (!navigator.clipboard) toast(T('Hochgeladen'));
@@ -795,40 +855,55 @@ window.addEventListener('beforeunload', e => { if (uploading) { e.preventDefault
 
 function buildFilePane() {
     const opts = buildSecretOptions('file');
-    const pick = el('input', { type: 'file' });
-    const title = el('b', { text: T('Datei auswählen oder hierher ziehen') });
-    const sub = el('span', { text: T('Höchstens %s. Wird in deinem Browser verschlüsselt, bevor sie hochgeladen wird.', fmtSize(BOOT.files.maxBytes)) });
+    const pick = el('input', { type: 'file', multiple: true });
+    const title = el('b', {});
+    const sub = el('span', {});
     const drop = el('label', { class: 'drop' }, pick, el('span', { icon: 'upload' }), title, sub);
-    let file = null;
-    const choose = f => {
-        file = f || null;
-        title.textContent = file ? file.name : T('Datei auswählen oder hierher ziehen');
-        sub.textContent = file ? fmtSize(file.size) : T('Höchstens %s. Wird in deinem Browser verschlüsselt, bevor sie hochgeladen wird.', fmtSize(BOOT.files.maxBytes));
+    const chosen = el('div', { class: 'chosen' });
+    let files = [];
+    const draw = () => {
+        const sum = files.reduce((a, f) => a + f.size, 0);
+        title.textContent = !files.length ? T('Dateien auswählen oder hierher ziehen') : files.length === 1 ? files[0].name : T('%s Dateien ausgewählt', files.length);
+        sub.textContent = !files.length ? T('Eine oder mehrere, je höchstens %s. Sie werden in deinem Browser verschlüsselt, bevor sie hochgeladen werden.', fmtSize(BOOT.files.maxBytes))
+            : T('zusammen %s. Antippen, um weitere hinzuzufügen.', fmtSize(sum));
+        fill(chosen, files.length > 1 ? files.map((f, i) => el('span', { class: 'tag' }, f.name + ' (' + fmtSize(f.size) + ')',
+            el('button', { type: 'button', class: 'tagx', title: T('Entfernen'), 'aria-label': T('Entfernen'), icon: 'x', onclick: () => { files.splice(i, 1); draw(); } }))) : []);
+        chosen.hidden = files.length < 2;
     };
-    pick.addEventListener('change', () => choose(pick.files[0]));
+    const add = list => {
+        for (const f of list) {
+            if (files.length >= 50) { toast(T('Mehr als 50 Dateien auf einmal gehen nicht.'), true); break; }
+            if (!files.some(x => x.name === f.name && x.size === f.size && x.lastModified === f.lastModified)) files.push(f);
+        }
+        draw();
+    };
+    pick.addEventListener('change', () => { add([...pick.files]); pick.value = ''; });
     ['dragenter', 'dragover'].forEach(n => drop.addEventListener(n, e => { e.preventDefault(); drop.classList.add('over'); }));
     ['dragleave', 'drop'].forEach(n => drop.addEventListener(n, e => { e.preventDefault(); drop.classList.remove('over'); }));
-    drop.addEventListener('drop', e => { if (e.dataTransfer.files[0]) choose(e.dataTransfer.files[0]); });
+    drop.addEventListener('drop', e => add([...e.dataTransfer.files]));
     const bar = el('i', {});
     const progText = el('div', { class: 'progtext' });
     const prog = el('div', { hidden: true }, el('div', { class: 'prog' }, bar), progText);
     const go = el('button', { class: 'btn btn-primary', type: 'submit', text: T('Verschlüsseln und hochladen') });
     const form = el('form', { class: 'stack', autocomplete: 'off' },
-        el('h1', { text: T('Datei senden') }),
-        el('p', { class: 'sub', text: T('Der Empfänger bekommt einen Link. Nach dem Abholen oder nach der Frist wird die Datei vom Server gelöscht.') }),
-        drop, opts.node, prog, el('div', {}, go));
+        el('h1', { text: T('Dateien senden') }),
+        el('p', { class: 'sub', text: T('Der Empfänger bekommt einen kurzen Link aus drei Wörtern und kann jede Datei einzeln abholen. Nach dem Abholen oder nach der Frist wird vom Server gelöscht.') }),
+        drop, chosen, opts.node, prog, el('div', {}, go));
+    draw();
     form.addEventListener('submit', async e => {
         e.preventDefault();
         if (uploading) return;
-        if (!file) { toast(T('Bitte erst eine Datei auswählen.'), true); return; }
-        if (file.size > BOOT.files.maxBytes) { toast(T('Die Datei ist zu groß. Erlaubt sind höchstens %s.', fmtSize(BOOT.files.maxBytes)), true); return; }
-        uploading = true; go.disabled = true; prog.hidden = false; bar.style.width = '0'; progText.textContent = '';
+        if (!files.length) { toast(T('Bitte erst eine Datei auswählen.'), true); return; }
+        const big = files.find(f => f.size > BOOT.files.maxBytes);
+        if (big) { toast(T('„%s“ ist zu groß. Erlaubt sind höchstens %s je Datei.', big.name, fmtSize(BOOT.files.maxBytes)), true); return; }
+        uploading = true; go.disabled = true; prog.hidden = false; bar.style.width = '0'; progText.textContent = T('Abholcode wird vorbereitet…');
         try {
-            const res = await sendSecret('file', file, { name: file.name, type: file.type || '', size: file.size }, opts.read(), (done, total) => {
+            const items = files.map(f => ({ blob: f, meta: { name: f.name, type: f.type || '', size: f.size } }));
+            const res = await sendShare('file', items, opts.read(), opts.long(), (done, total, i) => {
                 bar.style.width = (total ? (done / total) * 100 : 100) + '%';
-                progText.textContent = T('%s von %s hochgeladen', fmtSize(done), fmtSize(total));
+                progText.textContent = (items.length > 1 ? T('Datei %s von %s', i + 1, items.length) + ', ' : '') + T('%s von %s hochgeladen', fmtSize(done), fmtSize(total));
             });
-            pick.value = ''; choose(null); opts.reset();
+            files = []; draw(); opts.reset();
             showSecretResult(res, 'file');
             setView('files');
         } catch (err) { toast(err.message, true); }
@@ -852,7 +927,7 @@ function buildNotePane() {
         if (bytes.length > BOOT.files.noteMax) { toast(T('Die Notiz ist zu lang (höchstens %s Zeichen).', num(BOOT.files.noteMax)), true); return; }
         go.disabled = true;
         try {
-            const res = await sendSecret('note', new Blob([bytes]), { name: '', type: 'text/plain', size: bytes.length }, opts.read());
+            const res = await sendShare('note', [{ blob: new Blob([bytes]), meta: { name: '', type: 'text/plain', size: bytes.length } }], opts.read(), opts.long());
             text.value = ''; opts.reset();
             showSecretResult(res, 'note');
             setView('files');
@@ -862,11 +937,15 @@ function buildNotePane() {
     return form;
 }
 
-function fileCard(f) {
-    const local = KEYS.all()[f.id];
+/** Eine Karte je Sendung: g = { grp, files: [...] } */
+function fileCard(g) {
+    const f = g.files[0];
+    const local = KEYS.all()[g.grp];
+    const url = KEYS.link(g.grp);
     const note = f.kind === 'note';
-    const name = f.label || (local && local.name) || (note ? T('Notiz') : T('Datei'));
-    const url = local ? f.url + '#' + local.k : null;
+    const many = g.files.length > 1;
+    const name = f.label || (local && local.name) || (note ? T('Notiz') : many ? T('%s Dateien', g.files.length) : T('Datei'));
+    const size = g.files.reduce((a, x) => a + x.size, 0);
     const tags = [];
     const tag = (cls, iconName, text, title) => {
         const t = el('span', { class: 'tag ' + cls, title });
@@ -874,25 +953,28 @@ function fileCard(f) {
         t.append(text);
         tags.push(t);
     };
-    if (f.state === 'pending') tag('bad', 'upload', T('Upload nicht abgeschlossen'));
+    if (g.files.some(x => x.state === 'pending')) tag('bad', 'upload', T('Upload nicht abgeschlossen'));
     tag('warn', 'clock', T('noch %s', relTime(f.expires)), T('Wird gelöscht am %s', fmtDateTime(f.expires)));
     if (f.has_pass) tag('acc', 'lock', T('Passwort'));
+    if (local && local.p) tag('acc', null, local.p, T('Abholcode'));
     if (state.all && f.owner) tag('', 'user', f.owner);
-    if (!local && f.state !== 'pending') tag('', null, T('Link nur auf dem Gerät des Uploads'), T('Der Schlüssel liegt nur in dem Browser, von dem hochgeladen wurde. Der Server kennt ihn nicht.'));
+    if (!local) tag('', null, T('Link nur auf dem Gerät des Uploads'), T('Der Abholcode liegt nur in dem Browser, von dem hochgeladen wurde. Der Server kennt ihn nicht.'));
     tag('', null, fmtDate(f.created), T('Angelegt am %s', fmtDateTime(f.created)));
-    return el('article', { class: 'card glass' + (f.state === 'pending' ? ' ended' : '') },
+    return el('article', { class: 'card glass' },
         el('div', { class: 'head' },
             el('div', { class: 'title', title: name }, el('span', { icon: note ? 'note' : 'file', style: 'display:flex' }), el('span', { text: name })),
-            el('div', { class: 'clicks' }, el('b', { text: num(f.downloads) + ' / ' + num(f.max_downloads) }), el('small', { text: T('Abrufe') }))
+            many
+                ? el('div', { class: 'clicks' }, el('b', { text: num(g.files.length) }), el('small', { text: T('Dateien übrig') }))
+                : el('div', { class: 'clicks' }, el('b', { text: num(f.downloads) + ' / ' + num(f.max_downloads) }), el('small', { text: T('Abrufe') }))
         ),
-        el('div', { class: 'to', text: (note ? T('Notiz') : T('Datei')) + ', ' + fmtSize(f.size) }),
+        el('div', { class: 'to', text: (note ? T('Notiz') : many ? T('%s Dateien', g.files.length) : T('Datei')) + ', ' + fmtSize(size) + (many ? ', ' + T('je %s Abrufe', num(f.max_downloads)) : '') }),
         el('div', { class: 'tags' }, tags),
         el('div', { class: 'acts' },
             url ? btn(T('Link kopieren'), 'btn-soft', () => copyText(url), 'copy') : el('span', { style: 'flex:1 1 auto' }),
-            url ? ibtn('qr', T('QR-Code'), () => qrDialog({ short: url, code: f.id })) : null,
+            url ? ibtn('qr', T('QR-Code'), () => qrDialog({ short: url, code: g.grp })) : null,
             ibtn('trash', T('Löschen'), async () => {
-                if (!await confirmBox(note ? T('Notiz löschen?') : T('Datei löschen?'), T('„%s“ wird sofort vom Server gelöscht, der Link funktioniert danach nicht mehr.', name), T('Löschen'), true)) return;
-                if (await run('file_delete', { id: f.id }, T('Gelöscht.'))) { KEYS.drop(f.id); loadFiles(); }
+                if (!await confirmBox(T('Wirklich löschen?'), T('„%s“ wird sofort vom Server gelöscht, der Link funktioniert danach nicht mehr.', name), T('Löschen'), true)) return;
+                if (await run('file_delete', { grp: g.grp }, T('Gelöscht.'))) { KEYS.drop(g.grp); loadFiles(); }
             }, 'danger')
         )
     );
@@ -917,10 +999,17 @@ async function loadFiles() {
     const seq = ++loadSeq;
     const r = await run('file_list', { all: state.all });
     if (!r || seq !== loadSeq) return;
-    state.files = r.files;
+    // Dateien derselben Sendung zusammenfassen
+    const groups = new Map();
+    for (const f of r.files) {
+        if (!groups.has(f.grp)) groups.set(f.grp, { grp: f.grp, files: [] });
+        groups.get(f.grp).files.push(f);
+    }
+    state.files = [...groups.values()];
+    state.files.forEach(g => g.files.sort((a, b) => a.idx - b.idx));
     state.used = r.used;
     state.quota = r.total;
-    if (!state.all) KEYS.prune(r.files.map(f => f.id));
+    if (!state.all) KEYS.prune(state.files.map(g => g.grp));
     renderFiles();
 }
 
@@ -947,7 +1036,7 @@ if (BOOT.files.on) {
         b.append(label);
         return b;
     };
-    fill($('modes'), tab('link', T('Link kürzen'), 'link', setMode), tab('file', T('Datei senden'), 'upload', setMode), tab('note', T('Notiz senden'), 'note', setMode));
+    fill($('modes'), tab('link', T('Link kürzen'), 'link', setMode), tab('file', T('Dateien senden'), 'upload', setMode), tab('note', T('Notiz senden'), 'note', setMode));
     fill($('views'), tab('links', T('Links'), 'link', setView), tab('files', T('Dateien & Notizen'), 'file', setView));
     $('modeFile').append(buildFilePane());
     $('modeNote').append(buildNotePane());
