@@ -25,7 +25,9 @@ $suBoot = [
     'settings' => $suIsAdmin ? [
         'site_name' => suSetting('site_name'), 'imprint_url' => suSetting('imprint_url'), 'privacy_url' => suSetting('privacy_url'),
         'keep_expired_days' => suKeepExpiredDays(),
+        'files_max_mb' => (int)(suFilesMaxBytes() / 1048576), 'files_total_gb' => (int)(suFilesTotalBytes() / 1073741824), 'files_max_days' => suFilesMaxDays(),
     ] : null,
+    'files' => ['chunk' => suChunkSize(), 'maxBytes' => suFilesMaxBytes(), 'maxDays' => suFilesMaxDays(), 'noteMax' => SU_NOTE_MAX_BYTES, 'on' => suFilesTotalBytes() > 0],
     'https' => suIsHttps(),
 ];
 $suFooter = suFooterLinks();
@@ -60,6 +62,8 @@ $suFooter = suFooterLinks();
     </header>
 
     <section class="hero glass">
+        <div class="seg modes" id="modes" role="tablist"></div>
+        <div id="modeLink">
         <h1><?= h(t('Link kürzen')) ?></h1>
         <p class="sub"><?= h(t('Lange Adresse rein, kurze Adresse raus. Die kurze funktioniert für jeden, ganz ohne Anmeldung.')) ?></p>
         <form id="newForm" autocomplete="off">
@@ -72,10 +76,15 @@ $suFooter = suFooterLinks();
             </div>
             <div class="opts" id="newOpts" hidden></div>
         </form>
+        </div>
+        <div id="modeFile" hidden></div>
+        <div id="modeNote" hidden></div>
         <div id="result"></div>
     </section>
 
-    <div class="bar">
+    <div class="seg views" id="views" role="tablist"></div>
+
+    <div class="bar" id="bar">
         <div class="search"><input class="in" id="q" type="search" placeholder="<?= h(t('Suchen in Kurzname, Ziel und Notiz…')) ?>" aria-label="<?= h(t('Suchen')) ?>"></div>
         <select class="in" id="filter" aria-label="<?= h(t('Filter')) ?>">
             <option value=""><?= h(t('Alle Links')) ?></option>
@@ -104,6 +113,9 @@ $suFooter = suFooterLinks();
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <script type="application/json" id="boot"><?= json_encode($suBoot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_INVALID_UTF8_SUBSTITUTE) ?></script>
+<script nonce="<?= h($SU_NONCE) ?>">
+<?php require SU_APP . '/views/crypto.js.php'; ?>
+</script>
 <?php require SU_APP . '/views/app.js.php'; ?>
 </body>
 </html>

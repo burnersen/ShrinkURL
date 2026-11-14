@@ -179,6 +179,92 @@ try {
         exit;
     }
 
+    /* ---------- Dateien und Notizen ---------- */
+
+    case 'file_init': {
+        // Kündigt einen Upload an. Der Inhalt folgt stückweise mit file_chunk, schon im Browser verschlüsselt.
+        $kind = ($_POST['kind'] ?? '') === 'note' ? 'note' : 'file';
+        $size = (int)($_POST['size'] ?? -1);
+        $chunkSize = (int)($_POST['chunk_size'] ?? 0);
+        $meta = (string)($_POST['meta'] ?? '');
+        if ($size < 0 || $chunkSize < 1024 || $chunkSize > suChunkSize() || !preg_match('/^[A-Za-z0-9_\-]{20,6000}$/', $meta)) {
+            throw new Exception(t('Der Upload ist nicht gültig. Bitte die Seite neu laden und noch einmal versuchen.'));
+        }
+        if ($kind === 'note' && $size > SU_NOTE_MAX_BYTES) throw new Exception(t('Die Notiz ist zu lang (höchstens %s Zeichen).', number_format(SU_NOTE_MAX_BYTES, 0, ',', '.')));
+        if ($size > suFilesMaxBytes()) throw new Exception(t('Die Datei ist zu groß. Erlaubt sind höchstens %s MB.', (int)(suFilesMaxBytes() / 1048576)));
+        $chunks = max(1, (int)ceil($size / $chunkSize));
+        $encSize = $size + $chunks * 16;
+        if (suFilesUsed() + $encSize > suFilesTotalBytes()) throw new Exception(t('Der Platz für Dateien ist voll. Bitte erst ältere löschen oder warten, bis sie ablaufen.'));
+        $ttl = max(300, min(suFilesMaxDays() * 86400, (int)($_POST['ttl'] ?? 0)));
+        $max = max(1, min(1000, (int)($_POST['max_downloads'] ?? 1)));
+        $pass = null;
+        $p = suPostPass('pass');
+        if ($p !== '') {
+            if (strlen($p) < 4) throw new Exception(t('Das Passwort braucht mindestens 4 Zeichen.'));
+            $pass = password_hash($p, PASSWORD_DEFAULT);
+        }
+        $id = suNewFileId();
+        $db->prepare('INSERT INTO files (id, user_id, kind, label, meta, size, plain_size, chunk_size, chunks, created, expires, max_downloads, pass) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+           ->execute([$id, $suUid, $kind, suPostStr('label', 200), $meta, $encSize, $size, $chunkSize, $chunks, time(), time() + $ttl, $max, $pass]);
+        if (@file_put_contents(suFilePath($id), '') === false) {
+            suFileDelete($id);
+            throw new Exception(t('Auf dem Server lässt sich die Datei nicht anlegen. Bitte die Schreibrechte von data/ prüfen.'));
+        }
+        jsonOut(['success' => true, 'id' => $id, 'chunks' => $chunks, 'url' => suBaseUrl() . 'f/' . $id]);
+    }
+
+    case 'file_chunk': {
+        // Ein Stück anhängen. Der Inhalt kommt roh im Rumpf der Anfrage, die Stücke streng der Reihe nach.
+        $f = suFileRow((string)($_GET['id'] ?? ''));
+        if (!$f || (int)$f['user_id'] !== $suUid || $f['complete']) throw new Exception(t('Diesen Upload gibt es nicht (mehr).'));
+        $n = (int)($_GET['n'] ?? -1);
+        if ($n < (int)$f['received']) jsonOut(['success' => true, 'received' => (int)$f['received']]); // kam schon an, die Antwort ging nur verloren
+        if ($n !== (int)$f['received']) throw new Exception(t('Der Upload ist durcheinandergeraten. Bitte noch einmal von vorn.'));
+        $cs = (int)$f['chunk_size'] + 16;
+        $last = $n === (int)$f['chunks'] - 1;
+        $expect = $last ? (int)$f['size'] - $cs * ((int)$f['chunks'] - 1) : $cs;
+        $path = suFilePath($f['id']);
+        $fp = @fopen($path, 'c+b');
+        if (!$fp || !flock($fp, LOCK_EX)) throw new Exception(t('Auf dem Server lässt sich die Datei nicht anlegen. Bitte die Schreibrechte von data/ prüfen.'));
+        // Immer genau an die Stelle dieses Stücks schreiben, ein halb angekommener Versuch wird so überschrieben
+        ftruncate($fp, $n * $cs);
+        fseek($fp, $n * $cs);
+        $in = fopen('php://input', 'rb');
+        $got = (int)stream_copy_to_stream($in, $fp, $expect + 1);
+        fclose($in);
+        if ($got !== $expect) {
+            ftruncate($fp, $n * $cs);
+            flock($fp, LOCK_UN);
+            fclose($fp);
+            throw new Exception(t('Ein Stück der Datei kam unvollständig an. Bitte noch einmal versuchen.'));
+        }
+        fflush($fp);
+        flock($fp, LOCK_UN);
+        fclose($fp);
+        $db->prepare('UPDATE files SET received = ?, complete = ? WHERE id = ?')->execute([$n + 1, $last ? 1 : 0, $f['id']]);
+        jsonOut(['success' => true, 'received' => $n + 1, 'complete' => $last]);
+    }
+
+    case 'file_list': {
+        $all = $suAdmin && !empty($_POST['all']);
+        $st = $db->prepare('SELECT f.*, u.name AS owner FROM files f JOIN users u ON u.id = f.user_id WHERE ' . ($all ? '1' : 'f.user_id = ?') . ' ORDER BY f.created DESC LIMIT 500');
+        $st->execute($all ? [] : [$suUid]);
+        $out = [];
+        foreach ($st as $f) {
+            // Abgelaufenes gleich wegräumen, damit die Liste stimmt
+            if ((int)$f['expires'] <= time() || ((int)$f['downloads'] >= (int)$f['max_downloads'] && !suFileTokens($f))) { suFileDelete($f['id']); continue; }
+            $out[] = suFileOut($f);
+        }
+        jsonOut(['success' => true, 'files' => $out, 'used' => suFilesUsed(), 'total' => suFilesTotalBytes()]);
+    }
+
+    case 'file_delete': {
+        $f = suFileRow((string)($_POST['id'] ?? ''));
+        if (!$f || (!$suAdmin && (int)$f['user_id'] !== $suUid)) jsonOut(['success' => true]); // schon weg
+        suFileDelete($f['id']);
+        jsonOut(['success' => true]);
+    }
+
     /* ---------- Eigenes Konto ---------- */
 
     case 'prefs': {
@@ -275,9 +361,12 @@ try {
         $id = (int)($_POST['id'] ?? 0);
         if ($id === $suUid) throw new Exception(t('Dein eigenes Konto kannst du nicht löschen.'));
         if (!suUserById($id)) throw new Exception(t('Dieses Konto gibt es nicht (mehr).'));
-        // Die Links des Kontos verschwinden mit (ON DELETE CASCADE)
+        // Erst die Dateien des Kontos von der Platte nehmen, die Links verschwinden mit dem Konto (ON DELETE CASCADE)
+        $st = $db->prepare('SELECT id FROM files WHERE user_id = ?');
+        $st->execute([$id]);
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $fid) suFileDelete($fid);
         $db->prepare('DELETE FROM users WHERE id = ?')->execute([$id]);
-        jsonOut(['success' => true, 'message' => t('Das Konto und seine Links sind gelöscht.')]);
+        jsonOut(['success' => true, 'message' => t('Das Konto, seine Links und seine Dateien sind gelöscht.')]);
     }
 
     case 'settings': {
@@ -295,6 +384,9 @@ try {
         suSetSetting('imprint_url', $urls['imprint_url']);
         suSetSetting('privacy_url', $urls['privacy_url']);
         suSetSetting('keep_expired_days', (string)max(0, min(3650, (int)($_POST['keep_expired_days'] ?? SU_KEEP_EXPIRED_DAYS))));
+        suSetSetting('files_max_mb', (string)max(1, min(102400, (int)($_POST['files_max_mb'] ?? SU_FILES_MAX_MB))));
+        suSetSetting('files_total_gb', (string)max(0, min(10000, (int)($_POST['files_total_gb'] ?? SU_FILES_TOTAL_GB))));
+        suSetSetting('files_max_days', (string)max(1, min(365, (int)($_POST['files_max_days'] ?? SU_FILES_MAX_DAYS))));
         jsonOut(['success' => true, 'message' => t('Gespeichert.')]);
     }
 

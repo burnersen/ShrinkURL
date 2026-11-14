@@ -126,6 +126,7 @@ function suCleanup(): int {
         $st->execute([date('Y-m-d', $now - $days * 86400)]);
         $deleted += $st->rowCount();
     }
+    if (function_exists('suFilesCleanup')) suFilesCleanup();
     $db->prepare('DELETE FROM stats WHERE day < ?')->execute([date('Y-m-d', $now - SU_STATS_DAYS * 86400)]);
     foreach (glob(SU_SESSION_DIR . '/sess_*') ?: [] as $f) {
         $age = $now - (int)@filemtime($f);

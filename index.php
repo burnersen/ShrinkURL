@@ -11,6 +11,9 @@
  * Servern nachgeladen. Kurzlinks funktionieren für jeden ohne Anmeldung, anlegen und verwalten
  * kann sie nur, wer ein Konto hat.
  *
+ * Dazu Dateien und Notizen zum einmaligen Abholen: im Browser verschlüsselt, der Schlüssel steckt
+ * im Link hinter dem # und erreicht den Server nie. Nach dem Abholen oder nach der Frist gelöscht.
+ *
  * Datenschutz: Beim Aufruf eines Kurzlinks wird nur ein Zähler pro Tag erhöht. Keine IP-Adresse,
  * kein Cookie, kein Browser-Kennzeichen, keine Herkunftsseite.
  *
@@ -26,12 +29,13 @@ error_reporting(E_ALL);
 ini_set('display_errors', '0');
 date_default_timezone_set('Europe/Berlin');
 
-define('SU_VERSION', '1.0.0');
+define('SU_VERSION', '2.0.0');
 define('SU_ROOT', __DIR__);          // hier liegt die index.php, daneben data/
 define('SU_APP', SU_ROOT . '/app');  // Programmteile
 define('SU_DATA_DIR', SU_ROOT . '/data');
 define('SU_SESSION_DIR', SU_DATA_DIR . '/sessions');
 define('SU_THROTTLE_DIR', SU_DATA_DIR . '/throttle'); // Fehlversuche bei Anmeldung und Link-Passwörtern
+define('SU_FILES_DIR', SU_DATA_DIR . '/files');       // verschlüsselte Dateien und Notizen
 define('SU_SESSION_NAME', 'SUSESSID');
 define('SU_SESSION_DAYS', 30);     // so lange bleibt man an einem Gerät angemeldet
 define('SU_CODE_LENGTH', 5);       // Länge der zufälligen Kurzcodes
@@ -40,6 +44,12 @@ define('SU_MAX_USERS', 100);
 define('SU_MIN_PASSWORD', 10);
 define('SU_STATS_DAYS', 400);      // so lange bleiben die Tageszähler erhalten
 define('SU_KEEP_EXPIRED_DAYS', 30); // Vorgabe: abgelaufene Links nach so vielen Tagen löschen (in der Verwaltung änderbar)
+// Dateien und Notizen. Die drei Vorgaben lassen sich in der Verwaltung ändern.
+define('SU_FILES_MAX_MB', 1024);   // größte einzelne Datei
+define('SU_FILES_TOTAL_GB', 20);   // so viel Platz dürfen alle Dateien zusammen belegen
+define('SU_FILES_MAX_DAYS', 30);   // längste Aufbewahrung
+define('SU_NOTE_MAX_BYTES', 100000);        // längste Notiz
+define('SU_DOWNLOAD_TOKEN_HOURS', 6);       // so lange darf ein begonnener Download dauern
 
 $SU_NONCE = rtrim(strtr(base64_encode(random_bytes(18)), '+/', '-_'), '=');
 
@@ -57,6 +67,7 @@ require SU_APP . '/lib/db.php';
 
 if (PHP_SAPI === 'cli') {
     require SU_APP . '/lib/links.php';
+    require SU_APP . '/lib/files.php';
     $n = suCleanup();
     echo "ShrinkURL: aufgeräumt, {$n} Link(s) gelöscht.\n";
     exit(0);
@@ -66,6 +77,13 @@ if (PHP_SAPI === 'cli') {
 
 $suPath = suRequestPath();
 if ($suPath !== '' && $suPath !== 'index.php') {
+    // Datei oder Notiz abholen: kurz.example.org/f/<Kennung>
+    if (strncmp($suPath, 'f/', 2) === 0) {
+        require SU_APP . '/lib/files.php';
+        require SU_APP . '/lib/filepage.php';
+        suHandleFile(substr($suPath, 2));
+        exit;
+    }
     require SU_APP . '/lib/redirect.php';
     suHandleShort($suPath);
     exit;
@@ -73,7 +91,7 @@ if ($suPath !== '' && $suPath !== 'index.php') {
 
 /* ---------- Alles andere: Verwaltung ---------- */
 
-foreach (['security', 'auth', 'totp', 'links', 'font'] as $suPart) {
+foreach (['security', 'auth', 'totp', 'links', 'files', 'font'] as $suPart) {
     require SU_APP . '/lib/' . $suPart . '.php';
 }
 unset($suPart);

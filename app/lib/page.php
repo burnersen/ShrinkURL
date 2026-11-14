@@ -43,8 +43,10 @@ function suFooterLinks(): string {
 /**
  * Gibt eine kleine, eigenständige Seite aus und beendet die Anfrage.
  * $inner ist fertiges HTML (alles Fremde darin muss schon mit h() entschärft sein).
+ * $script ist JavaScript für diese Seite (nur die Abholseite für Dateien braucht welches).
  */
-function suPageOut(string $title, string $inner, int $status = 200): void {
+function suPageOut(string $title, string $inner, int $status = 200, string $script = ''): void {
+    global $SU_NONCE;
     if (!headers_sent()) {
         http_response_code($status);
         header('Content-Type: text/html; charset=utf-8');
@@ -55,7 +57,8 @@ function suPageOut(string $title, string $inner, int $status = 200): void {
         header('X-Robots-Tag: noindex, nofollow, noarchive');
         if (suIsHttps()) header('Strict-Transport-Security: max-age=31536000');
         // Kein form-action: nach dem Absenden eines Link-Passworts geht es auf eine fremde Seite weiter
-        header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self' data:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'");
+        header("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self' data:; manifest-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+            . ($script !== '' ? "; script-src 'nonce-{$SU_NONCE}'; connect-src 'self'" : ''));
     }
     $base = suBasePath() . '/';
     $footer = suFooterLinks();
@@ -67,7 +70,10 @@ function suPageOut(string $title, string $inner, int $status = 200): void {
 <meta name="robots" content="noindex, nofollow">
 <meta name="color-scheme" content="dark light">
 <title><?= h($title) ?> · <?= h(suSiteName()) ?></title>
+<meta name="theme-color" content="#0b1120">
 <link rel="icon" type="image/svg+xml" href="<?= h($base) ?>?action=icon">
+<link rel="apple-touch-icon" href="<?= h($base) ?>?action=icon&amp;s=192">
+<link rel="manifest" href="<?= h($base) ?>?action=manifest">
 <style>
 @font-face { font-family: 'Inter'; font-style: normal; font-weight: 100 900; font-display: swap; src: url('<?= h($base) ?>?action=font') format('woff2'); }
 <?= suCssTokens() ?>
@@ -105,6 +111,12 @@ button:active, .btn:active { transform: scale(.98); }
 a { color: var(--acc-text); }
 footer { font-size: .8rem; color: var(--muted); text-align: center; }
 footer a { color: var(--muted); }
+.prog { height: .6rem; border-radius: .3rem; background: var(--field); border: 1px solid var(--line); overflow: hidden; margin-bottom: 1rem; }
+.prog i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--acc), var(--acc3)); transition: width .2s; }
+textarea { display: block; width: 100%; min-height: 9rem; margin-bottom: 1rem; padding: .7rem .85rem; border-radius: .7rem; border: 1px solid var(--line); background: var(--field);
+        color: var(--text); font: .95rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; outline: none; }
+[hidden] { display: none !important; }
+.fname { font-weight: 600; }
 .big { font-size: 3rem; font-weight: 800; letter-spacing: -.04em; line-height: 1; margin-bottom: .5rem; background: linear-gradient(135deg, var(--acc3), var(--acc2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 </style>
 </head>
@@ -115,6 +127,8 @@ footer a { color: var(--muted); }
 
 </main>
 <?php if ($footer !== ''): ?><footer><?= $footer ?></footer><?php endif; ?>
+<?php if ($script !== ''): ?><script nonce="<?= h($SU_NONCE) ?>"><?= $script ?></script>
+<?php endif; ?>
 </body>
 </html>
 <?php
