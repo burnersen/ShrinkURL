@@ -1,0 +1,6 @@
+# Everything secret lives here. Never commit it.
+/data/
+/.htaccess
+
+# Built release files (php tools/build-release.php)
+/dist/
