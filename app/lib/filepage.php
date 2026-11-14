@@ -28,6 +28,7 @@ function suFileGone(): void {
 function suHandleFile(string $id): void {
     $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
     $api = $method === 'POST' || isset($_GET['c']);
+    if (!$api) suFilesCleanupSoon();
     $f = suFileRow($id);
     $state = $f ? suFileState($f) : 'none';
     // Abgelaufenes sofort wegräumen, nicht erst beim nächsten Aufräumen
@@ -83,26 +84,30 @@ function suHandleFile(string $id): void {
     suPageOut($note ? t('Notiz') : t('Datei'), $html, 200, $script);
 }
 
+/**
+ * Beendet einen Download: Das Kennzeichen wird ungültig. Sind damit alle erlaubten Abrufe verbraucht
+ * und läuft kein anderer Download mehr, wird die Datei sofort gelöscht. Liefert true, wenn gelöscht wurde.
+ */
+function suFileFinish(string $id, string $token): bool {
+    $db = suDb();
+    $db->exec('BEGIN IMMEDIATE');
+    $cur = suFileRow($id);
+    if (!$cur) { $db->exec('COMMIT'); return true; }
+    $tokens = suFileTokens($cur);
+    unset($tokens[$token]);
+    $last = (int)$cur['downloads'] >= (int)$cur['max_downloads'] && !$tokens;
+    if (!$last) $db->prepare('UPDATE files SET tokens = ? WHERE id = ?')->execute([json_encode((object)$tokens), $id]);
+    $db->exec('COMMIT');
+    if ($last) suFileDelete($id);
+    return $last;
+}
+
 function suFileAction(array $f, string $state): void {
     $op = (string)($_POST['op'] ?? '');
     $db = suDb();
 
     if ($op === 'done') {
-        $token = (string)($_POST['t'] ?? '');
-        $db->exec('BEGIN IMMEDIATE');
-        $cur = suFileRow($f['id']);
-        if ($cur) {
-            $tokens = suFileTokens($cur);
-            unset($tokens[$token]);
-            if ((int)$cur['downloads'] >= (int)$cur['max_downloads'] && !$tokens) {
-                $db->exec('COMMIT');
-                suFileDelete($cur['id']);
-                suFileJson(['ok' => true, 'deleted' => true]);
-            }
-            $db->prepare('UPDATE files SET tokens = ? WHERE id = ?')->execute([json_encode((object)$tokens), $cur['id']]);
-        }
-        $db->exec('COMMIT');
-        suFileJson(['ok' => true, 'deleted' => false]);
+        suFileJson(['ok' => true, 'deleted' => suFileFinish($f['id'], (string)($_POST['t'] ?? ''))]);
     }
 
     if ($op !== 'info' && $op !== 'start') suFileJson(['ok' => false, 'message' => t('Unbekannte Aktion.')], 400);
@@ -162,5 +167,15 @@ function suFileSendChunk(array $f): void {
         echo $buf;
     }
     fclose($fp);
+    // Das letzte Stück ist vollständig raus: dieser Download ist fertig. War es der letzte erlaubte,
+    // löscht der Server jetzt selbst, ohne auf eine Rückmeldung des Browsers zu warten.
+    if ($len === 0 && $n === (int)$f['chunks'] - 1) {
+        @ob_flush();
+        flush();
+        if (!connection_aborted()) {
+            ignore_user_abort(true);
+            try { suFileFinish($f['id'], $token); } catch (Throwable $e) {}
+        }
+    }
     exit;
 }

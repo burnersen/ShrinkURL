@@ -68,7 +68,8 @@ async function download() {
         if (sink) try { await sink.abort(); } catch (e2) {}
         throw e;
     }
-    post({ op: 'done', t: start.token }).catch(() => {});
+    // Dem Server sagen, dass alles angekommen ist (er löscht auch von selbst, sobald das letzte Stück raus ist)
+    try { await post({ op: 'done', t: start.token }); } catch (e) {}
     if (FD.note) {
         const text = new TextDecoder().decode(await new Blob(parts).arrayBuffer());
         $('fNote').value = text;

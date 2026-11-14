@@ -91,8 +91,32 @@ function suFileState(array $f): string {
 
 function suFileDelete(string $id): void {
     if (!suFileIdOk($id)) return;
+    // Erst die Datei, dann der Eintrag: klappt das Löschen der Datei nicht, bleibt der Eintrag
+    // stehen und das nächste Aufräumen versucht es wieder, statt die Datei zu vergessen.
+    $path = suFilePath($id);
+    if (is_file($path)) {
+        @unlink($path);
+        clearstatcache(true, $path);
+        if (is_file($path)) {
+            // Notlösung, falls der Server das Löschen verweigert: Inhalt leeren, damit nichts lesbar liegen bleibt
+            @file_put_contents($path, '');
+            suDb()->prepare('UPDATE files SET expires = 0, complete = 0 WHERE id = ?')->execute([$id]);
+            return;
+        }
+    }
     suDb()->prepare('DELETE FROM files WHERE id = ?')->execute([$id]);
-    @unlink(suFilePath($id));
+}
+
+/**
+ * Aufräumen ohne Cronjob: höchstens alle 10 Minuten, angestoßen von ganz normalen Aufrufen
+ * (Verwaltung öffnen, Abholseite, ab und zu ein Kurzlink).
+ */
+function suFilesCleanupSoon(): void {
+    try {
+        if ((int)suSetting('last_files_cleanup', '0') > time() - 600) return;
+        suSetSetting('last_files_cleanup', (string)time());
+        suFilesCleanup();
+    } catch (Throwable $e) {}
 }
 
 /** Belegter Platz aller Dateien zusammen (auch unfertiger Uploads, mit ihrer angekündigten Größe) */
