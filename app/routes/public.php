@@ -52,6 +52,16 @@ if ($action === 'manifest') {
     exit;
 }
 
+// Wortliste für merkbare Abholcodes. Gewürfelt wird im Browser, der Server erfährt nicht, welche Wörter gewählt wurden.
+if ($action === 'words') {
+    suSecurityHeaders(false);
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Cache-Control: public, max-age=604800');
+    $lists = require SU_APP . '/lib/words.php';
+    echo $lists[($_GET['l'] ?? '') === 'en' ? 'en' : 'de'];
+    exit;
+}
+
 // Kleiner Helfer im Hintergrund der App. Android installiert ShrinkURL erst mit ihm als „richtige“ App,
 // und nur dann taucht es im Teilen-Menü auf. Er speichert bewusst NICHTS zwischen und zeigt ohne Netz
 // lediglich eine freundliche Seite statt des Browser-Fehlers.

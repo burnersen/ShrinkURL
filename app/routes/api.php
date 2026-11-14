@@ -203,14 +203,29 @@ try {
             if (strlen($p) < 4) throw new Exception(t('Das Passwort braucht mindestens 4 Zeichen.'));
             $pass = password_hash($p, PASSWORD_DEFAULT);
         }
-        $id = suNewFileId();
-        $db->prepare('INSERT INTO files (id, user_id, kind, label, meta, size, plain_size, chunk_size, chunks, created, expires, max_downloads, pass) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-           ->execute([$id, $suUid, $kind, suPostStr('label', 200), $meta, $encSize, $size, $chunkSize, $chunks, time(), time() + $ttl, $max, $pass]);
+        // Kennung: Bei einem Abholcode aus Wörtern berechnet sie der Browser aus dem Code, sonst vergibt sie der Server.
+        // Weitere Dateien derselben Sendung hängen sich mit grp an die erste an.
+        $grp = (string)($_POST['grp'] ?? '');
+        $idx = max(0, min(999, (int)($_POST['idx'] ?? 0)));
+        if ($grp !== '') {
+            $first = suFileGroup($grp);
+            if (!$first || (int)$first[0]['user_id'] !== $suUid || $kind === 'note' || $idx < 1) throw new Exception(t('Der Upload ist nicht gültig. Bitte die Seite neu laden und noch einmal versuchen.'));
+            foreach ($first as $row) if ((int)$row['idx'] === $idx) throw new Exception(t('Der Upload ist durcheinandergeraten. Bitte noch einmal von vorn.'));
+            $id = suNewFileId();
+        } else {
+            $id = (string)($_POST['id'] ?? '');
+            if ($id === '') $id = suNewFileId();
+            elseif (!suFileIdOk($id) || suFileRow($id) !== null || suFileGroup($id)) jsonOut(['success' => false, 'taken' => true, 'message' => t('Dieser Abholcode ist schon vergeben. Bitte noch einmal versuchen.')]);
+            $grp = $id;
+            $idx = 0;
+        }
+        $db->prepare('INSERT INTO files (id, grp, idx, user_id, kind, label, meta, size, plain_size, chunk_size, chunks, created, expires, max_downloads, pass) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+           ->execute([$id, $grp, $idx, $suUid, $kind, suPostStr('label', 200), $meta, $encSize, $size, $chunkSize, $chunks, time(), time() + $ttl, $max, $pass]);
         if (@file_put_contents(suFilePath($id), '') === false) {
             suFileDelete($id);
             throw new Exception(t('Auf dem Server lässt sich die Datei nicht anlegen. Bitte die Schreibrechte von data/ prüfen.'));
         }
-        jsonOut(['success' => true, 'id' => $id, 'chunks' => $chunks, 'url' => suBaseUrl() . 'f/' . $id]);
+        jsonOut(['success' => true, 'id' => $id, 'grp' => $grp, 'chunks' => $chunks]);
     }
 
     case 'file_chunk': {
@@ -247,7 +262,7 @@ try {
 
     case 'file_list': {
         $all = $suAdmin && !empty($_POST['all']);
-        $st = $db->prepare('SELECT f.*, u.name AS owner FROM files f JOIN users u ON u.id = f.user_id WHERE ' . ($all ? '1' : 'f.user_id = ?') . ' ORDER BY f.created DESC LIMIT 500');
+        $st = $db->prepare('SELECT f.*, u.name AS owner FROM files f JOIN users u ON u.id = f.user_id WHERE ' . ($all ? '1' : 'f.user_id = ?') . ' ORDER BY f.created DESC, f.idx LIMIT 2000');
         $st->execute($all ? [] : [$suUid]);
         $out = [];
         foreach ($st as $f) {
@@ -259,9 +274,10 @@ try {
     }
 
     case 'file_delete': {
-        $f = suFileRow((string)($_POST['id'] ?? ''));
-        if (!$f || (!$suAdmin && (int)$f['user_id'] !== $suUid)) jsonOut(['success' => true]); // schon weg
-        suFileDelete($f['id']);
+        // Löscht eine ganze Sendung, also alle Dateien unter einem Link
+        foreach (suFileGroup((string)($_POST['grp'] ?? '')) as $f) {
+            if ($suAdmin || (int)$f['user_id'] === $suUid) suFileDelete($f['id']);
+        }
         jsonOut(['success' => true]);
     }
 

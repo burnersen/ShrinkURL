@@ -37,7 +37,8 @@ Your web server's log files are not part of ShrinkURL. Whether IP addresses end 
 - Tracking parameters (`utm_…`, `fbclid`, `gclid` and the like) can be removed when shortening
 - QR code for every link, computed in the browser, downloadable as SVG or PNG
 - Statistics per link: visits per day for 30 days, 90 days or a year
-- **Send a file:** the file is encrypted in the browser and uploaded in pieces (so it fits through tight upload limits). The recipient only needs the link. Period, number of pick-ups and password are configurable, after the last pick-up it is deleted immediately.
+- **Send files:** one or several files at once, encrypted in the browser and uploaded in pieces (so they fit through tight upload limits). The recipient only needs the link and can pick up each file individually or all in a row. Period, number of pick-ups and password are configurable, after the last pick-up a file is deleted immediately.
+- **Memorable links:** files and notes get a pick-up code of three words and a number, e.g. `short.example.org/f#wave-apple-table-87`. It can be read out loud and typed in at `short.example.org/f`.
 - **Send a note:** the same for text, e.g. a password that should not stay in a chat forever
 - Limits for files in the administration: largest file, total space, longest retention
 - Search, filter, sort, edit, switch off, delete, export as CSV
@@ -115,10 +116,12 @@ Found a vulnerability? Please do not open a public issue, use "Report a vulnerab
 
 ## Files and notes in detail
 
-- The link looks like `https://your-domain/f/<id>#<key>`. Browsers never send the part after the `#` to the server.
+- The link looks like `https://your-domain/f#word-word-word-12`. Browsers never send the part after the `#` to the server. From the pick-up code the browser computes the id of the shipment (sent to the server) and the key (kept in the browser).
+- **How strong is the pick-up code?** Three words out of about 4000 plus a two-digit number give roughly 5 trillion possibilities. Guessing over the network is hopeless. Someone who has copied the encrypted files straight from the server (a breach at the hoster) can try codes offline, though. Every attempt is made deliberately expensive (PBKDF2, one million rounds), but by a rough estimate that still costs only years of GPU time, not millennia. For especially confidential content there is the option "Long link" with a random 256-bit key (`/f/<id>#<key>`).
+- Several files under one link are counted and deleted individually, each after its last allowed pick-up.
 - Whoever has the link can pick up, so only pass it to the intended person. An additional password protects in case the link ends up in the wrong hands.
 - The server does not know the key. You can therefore only copy the link again later in the browser you uploaded from (it remembers the key locally).
-- Deletion happens immediately after the last allowed pick-up, otherwise after the period. A cron job makes sure expired items disappear even if nobody comes by.
+- Deletion happens as soon as the last piece of the last allowed pick-up has been delivered, otherwise after the period. Expired items are removed at most every 10 minutes, triggered by normal requests. A cron job makes sure this also happens when nobody comes by at all.
 - Defaults: 1 GB per file, 20 GB in total, 30 days. All configurable in the administration.
 - iPhones have no share target for web apps, only Chrome on Android supports it.
 
@@ -132,6 +135,6 @@ php tools/build-release.php         # builds dist/shrinkurl-install.php and the 
 
 ## License
 
-[GNU Affero General Public License v3.0](LICENSE). Font: [Inter](https://github.com/rsms/inter) (SIL Open Font License 1.1). Icons: [Lucide](https://lucide.dev) (ISC license). Both are embedded.
+[GNU Affero General Public License v3.0](LICENSE). Font: [Inter](https://github.com/rsms/inter) (SIL Open Font License 1.1). Icons: [Lucide](https://lucide.dev) (ISC license). Word lists for pick-up codes: German from [dys2p/wordlists-de](https://github.com/dys2p/wordlists-de) (Unlicense, CC0 or BSD-3-Clause), English from the [Electronic Frontier Foundation](https://www.eff.org/deeplinks/2016/07/new-wordlists-random-passphrases) (CC BY 3.0 US), both filtered. Everything is embedded.
 
 Structure, installer and parts of the code come from the sister project [LinkVault](https://github.com/burnersen/LinkVault).

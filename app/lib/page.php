@@ -116,7 +116,14 @@ footer a { color: var(--muted); }
 textarea { display: block; width: 100%; min-height: 9rem; margin-bottom: 1rem; padding: .7rem .85rem; border-radius: .7rem; border: 1px solid var(--line); background: var(--field);
         color: var(--text); font: .95rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; outline: none; }
 [hidden] { display: none !important; }
-.fname { font-weight: 600; }
+.frow { display: flex; align-items: center; gap: .7rem; padding: .65rem .85rem; margin-bottom: .5rem; border-radius: .7rem; background: var(--field); border: 1px solid var(--line); }
+#fList { margin-bottom: 1rem; }
+.frow.got { border-color: rgba(16,185,129,.45); }
+.ftext { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.fname { font-weight: 600; word-break: break-all; font-size: .95rem; }
+.fsize { font-size: .82rem; color: var(--muted); }
+.fbtn { width: auto; flex-shrink: 0; padding: .5rem .8rem; font-size: .84rem; }
+button:disabled { opacity: .55; cursor: default; }
 .big { font-size: 3rem; font-weight: 800; letter-spacing: -.04em; line-height: 1; margin-bottom: .5rem; background: linear-gradient(135deg, var(--acc3), var(--acc2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 </style>
 </head>

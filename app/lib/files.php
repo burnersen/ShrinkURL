@@ -73,6 +73,14 @@ function suFileRow(string $id): ?array {
     return $st->fetch() ?: null;
 }
 
+/** Alle Dateien einer Sendung (ein Link kann mehrere Dateien enthalten), in der Reihenfolge des Hochladens */
+function suFileGroup(string $grp): array {
+    if (!suFileIdOk($grp)) return [];
+    $st = suDb()->prepare('SELECT f.*, u.name AS owner FROM files f JOIN users u ON u.id = f.user_id WHERE f.grp = ? ORDER BY f.idx, f.created');
+    $st->execute([$grp]);
+    return $st->fetchAll();
+}
+
 /** Laufende Downloads: Kennzeichen => Ablaufzeit. Abgelaufene fallen heraus. */
 function suFileTokens(array $f): array {
     $t = json_decode((string)$f['tokens'], true);
@@ -131,7 +139,7 @@ function suFileOut(array $f): array {
         'created' => (int)$f['created'], 'expires' => (int)$f['expires'],
         'max_downloads' => (int)$f['max_downloads'], 'downloads' => (int)$f['downloads'],
         'has_pass' => $f['pass'] !== null && $f['pass'] !== '', 'state' => suFileState($f),
-        'owner' => $f['owner'] ?? null, 'user_id' => (int)$f['user_id'], 'url' => suBaseUrl() . 'f/' . $f['id'],
+        'owner' => $f['owner'] ?? null, 'user_id' => (int)$f['user_id'], 'grp' => $f['grp'], 'idx' => (int)$f['idx'],
     ];
 }
 
