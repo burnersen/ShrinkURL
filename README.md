@@ -10,6 +10,8 @@ Dazu **Dateien und Notizen zum Abholen**: im Browser verschlüsselt, nach dem Ab
 
 **English version: [README.en.md](README.en.md)**
 
+**[🌐 Webseite](https://tech.burnersen.de/tools/shrinkurl/)** · <sub>🇬🇧 In English: [tech.burnersen.de/en/tools/shrinkurl-en](https://tech.burnersen.de/en/tools/shrinkurl-en/)</sub>
+
 [![PHP 7.4+](https://img.shields.io/badge/PHP-7.4%2B-777BB4?logo=php&logoColor=white)](#voraussetzungen)
 [![Lizenz: AGPLv3](https://img.shields.io/badge/Lizenz-AGPLv3-blue)](#lizenz)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Unterst%C3%BCtze%20mich-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/burnersen)

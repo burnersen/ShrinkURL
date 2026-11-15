@@ -10,6 +10,8 @@ Upload `shrinkurl-install.php`, open it in the browser, create the first account
 
 **Deutsche Fassung: [README.md](README.md)**
 
+**[🌐 Website](https://tech.burnersen.de/en/tools/shrinkurl-en/)** · <sub>🇩🇪 Auf Deutsch: [tech.burnersen.de/tools/shrinkurl](https://tech.burnersen.de/tools/shrinkurl/)</sub>
+
 [![PHP 7.4+](https://img.shields.io/badge/PHP-7.4%2B-777BB4?logo=php&logoColor=white)](#requirements)
 [![License: AGPLv3](https://img.shields.io/badge/License-AGPLv3-blue)](#license)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/burnersen)
