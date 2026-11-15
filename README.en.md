@@ -10,9 +10,17 @@ Upload `shrinkurl-install.php`, open it in the browser, create the first account
 
 **Deutsche Fassung: [README.md](README.md)**
 
+[![PHP 7.4+](https://img.shields.io/badge/PHP-7.4%2B-777BB4?logo=php&logoColor=white)](#requirements)
+[![License: AGPLv3](https://img.shields.io/badge/License-AGPLv3-blue)](#license)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/burnersen)
+
+**[⬇️ Download the latest release](../../releases/latest)** · **[☕ Buy me a coffee](https://ko-fi.com/burnersen)**
+
 ![ShrinkURL with sample entries](docs/screenshot.png)
 
 *Sample data, made up for the screenshot.*
+
+> 💜 **Using ShrinkURL and happy with it?** A ⭐ on GitHub is the easiest way to let me know, and it does more than you'd think: stars are the visible proof that a project does good work, and they are how small projects like this one get found by other people in the first place. Or [tell me what you use it for](https://github.com/burnersen/ShrinkURL/issues/new), I read every message. Thanks for being here!
 
 ## Privacy
 
@@ -132,6 +140,10 @@ php -S 127.0.0.1:8080 index.php     # test server, then open http://127.0.0.1:80
 php tools/extract-strings.php       # checks that every German text has an English version
 php tools/build-release.php         # builds dist/shrinkurl-install.php and the ZIP
 ```
+
+## ☕ Support
+
+ShrinkURL is free and made in my spare time, on my own hardware and electricity bill. If it saved you time and you'd like to say thanks, you can [drop a little something in the tip jar on Ko-fi](https://ko-fi.com/burnersen), it keeps motivation and coffee flowing. ☕ Completely optional, and either way: thank you for using it!
 
 ## License
 

@@ -10,9 +10,17 @@ Dazu **Dateien und Notizen zum Abholen**: im Browser verschlüsselt, nach dem Ab
 
 **English version: [README.en.md](README.en.md)**
 
+[![PHP 7.4+](https://img.shields.io/badge/PHP-7.4%2B-777BB4?logo=php&logoColor=white)](#voraussetzungen)
+[![Lizenz: AGPLv3](https://img.shields.io/badge/Lizenz-AGPLv3-blue)](#lizenz)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Unterst%C3%BCtze%20mich-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/burnersen)
+
+**[⬇️ Neuestes Release herunterladen](../../releases/latest)** · **[☕ Spendier mir einen Kaffee](https://ko-fi.com/burnersen)**
+
 ![ShrinkURL mit Beispieleinträgen](docs/screenshot.png)
 
 *Beispieldaten, erfunden für den Screenshot.*
+
+> 💜 **Gefällt dir ShrinkURL?** Ein ⭐ auf GitHub ist die einfachste Art, mir das zu sagen, und es bringt mehr, als man denkt: Sterne sind der sichtbare Beweis, dass ein Projekt gute Arbeit leistet, und genau darüber finden andere kleine Projekte wie dieses überhaupt erst Leute. Oder [erzähl mir, wofür du es nutzt](https://github.com/burnersen/ShrinkURL/issues/new), ich lese jede Nachricht. Danke, dass du da bist!
 
 ## Datenschutz
 
@@ -155,6 +163,10 @@ php -S 127.0.0.1:8080 index.php     # Testserver, dann http://127.0.0.1:8080/ ö
 php tools/extract-strings.php       # prüft, ob jeder deutsche Text eine englische Fassung hat
 php tools/build-release.php         # baut dist/shrinkurl-install.php und das ZIP
 ```
+
+## ☕ Unterstützen
+
+ShrinkURL ist kostenlos und entsteht in meiner Freizeit, auf meiner eigenen Hardware und Stromrechnung. Wenn es dir Zeit gespart hat und du Danke sagen möchtest, kannst du [ein kleines Trinkgeld bei Ko-fi dalassen](https://ko-fi.com/burnersen), das hält Motivation und Kaffee am Laufen. ☕ Völlig freiwillig, und in jedem Fall: danke fürs Benutzen!
 
 ## Lizenz
 
