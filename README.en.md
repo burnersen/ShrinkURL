@@ -147,6 +147,12 @@ php tools/build-release.php         # builds dist/shrinkurl-install.php and the 
 
 ShrinkURL is free and made in my spare time, on my own hardware and electricity bill. If it saved you time and you'd like to say thanks, you can [drop a little something in the tip jar on Ko-fi](https://ko-fi.com/burnersen), it keeps motivation and coffee flowing. ☕ Completely optional, and either way: thank you for using it!
 
+## ⚠️ Disclaimer
+
+ShrinkURL is free hobby software, provided **"as is", without any warranty or condition of any kind**. It was built and tested with care, but you use it **at your own risk**. Back up the folder `data/` yourself regularly. If you run ShrinkURL on your own server, you are responsible for that server and for the links and files shared through it.
+
+Where this README describes what ShrinkURL does, checks or never does, that is how it is designed to work, not a promise or guarantee: software can have bugs, and systems, services and other programs do not always behave as expected. As far as the applicable law allows, the author is not liable for any damages or data loss arising from the use of this software. See sections 15 and 16 of the [license](LICENSE).
+
 ## License
 
 [GNU Affero General Public License v3.0](LICENSE). Font: [Inter](https://github.com/rsms/inter) (SIL Open Font License 1.1). Icons: [Lucide](https://lucide.dev) (ISC license). Word lists for pick-up codes: German from [dys2p/wordlists-de](https://github.com/dys2p/wordlists-de) (Unlicense, CC0 or BSD-3-Clause), English from the [Electronic Frontier Foundation](https://www.eff.org/deeplinks/2016/07/new-wordlists-random-passphrases) (CC BY 3.0 US), both filtered. Everything is embedded.
